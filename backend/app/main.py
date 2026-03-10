@@ -31,7 +31,6 @@ async def connect(sid, environ):
 @sio.event
 async def disconnect(sid):
     print(f"Client disconnected: {sid}")
-    # Remove from any room
     for room_id, room in list(rooms.items()):
         if sid in room['participants']:
             room['participants'].remove(sid)
@@ -43,7 +42,7 @@ async def disconnect(sid):
 async def join_room(sid, data):
     room_id = data['room_id']
     username = data['username']
-    
+
     if room_id not in rooms:
         rooms[room_id] = {
             'participants': [],
@@ -51,19 +50,17 @@ async def join_room(sid, data):
             'language': 'javascript',
             'whiteboard': []
         }
-    
+
     rooms[room_id]['participants'].append(sid)
     await sio.enter_room(sid, room_id)
-    
-    # Send current room state to new joiner
+
     await sio.emit('room_joined', {
         'room_id': room_id,
         'code': rooms[room_id]['code'],
         'language': rooms[room_id]['language'],
         'participants': len(rooms[room_id]['participants'])
     }, to=sid)
-    
-    # Notify others
+
     await sio.emit('user_joined', {
         'username': username,
         'participants': len(rooms[room_id]['participants'])
@@ -91,17 +88,24 @@ async def whiteboard_draw(sid, data):
     if room_id in rooms:
         await sio.emit('whiteboard_updated', data, room=room_id, skip_sid=sid)
 
+# ── WebRTC — relay signals to everyone else in the room ───────
 @sio.event
 async def webrtc_offer(sid, data):
-    await sio.emit('webrtc_offer', data, to=data['target'])
+    room_id = data.get('room_id')
+    if room_id:
+        await sio.emit('webrtc_offer', data, room=room_id, skip_sid=sid)
 
 @sio.event
 async def webrtc_answer(sid, data):
-    await sio.emit('webrtc_answer', data, to=data['target'])
+    room_id = data.get('room_id')
+    if room_id:
+        await sio.emit('webrtc_answer', data, room=room_id, skip_sid=sid)
 
 @sio.event
 async def webrtc_ice_candidate(sid, data):
-    await sio.emit('webrtc_ice_candidate', data, to=data['target'])
+    room_id = data.get('room_id')
+    if room_id:
+        await sio.emit('webrtc_ice_candidate', data, room=room_id, skip_sid=sid)
 
 # ── Combine FastAPI + Socket.IO ───────────────────────────────
 socket_app = socketio.ASGIApp(sio, app)
