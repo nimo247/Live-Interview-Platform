@@ -1,0 +1,26 @@
+# Environment variables - NEVER commit
+backend/.env
+frontend/.env
+frontend/.env.local
+
+# Python
+backend/venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+node_modules/
+.next/
+.env
