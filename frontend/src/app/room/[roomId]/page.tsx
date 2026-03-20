@@ -327,7 +327,6 @@ export default function RoomPage() {
     setVideoActive(false)
     const socket = getSocket()
     socket.emit('video_stopped', { room_id: roomId })
-    destroyPeer()
   }
 
   const clearCanvas = () => {
