@@ -11,7 +11,7 @@ export default function Home() {
   const createRoom = async () => {
     if (!username.trim()) return alert('Enter your name first!')
     setLoading(true)
-    const res = await fetch('http://192.168.1.36:8000/rooms/create', { method: 'POST' })
+    const res = await fetch('http://192.168.1.35:8000/rooms/create', { method: 'POST' })
     const data = await res.json()
     router.push(`/room/${data.room_id}?username=${username}`)
   }

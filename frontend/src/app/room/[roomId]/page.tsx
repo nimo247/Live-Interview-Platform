@@ -342,7 +342,7 @@ export default function RoomPage() {
     setFeedback('')
     setLoadingFeedback(true)
     try {
-      const res = await fetch('http://192.168.1.36:8000/rooms/ai-feedback', {
+      const res = await fetch('http://192.168.1.35:8000/rooms/ai-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language })

@@ -4,7 +4,7 @@ let socket: Socket | null = null
 
 export const getSocket = (): Socket => {
   if (!socket) {
-    socket = io('http://192.168.1.36:8000', {
+    socket = io('http://192.168.1.35:8000', {
       transports: ['websocket'],
     })
   }

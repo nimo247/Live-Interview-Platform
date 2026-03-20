@@ -6,7 +6,7 @@ import socketio
 # ── Socket.IO setup ───────────────────────────────────────────
 sio = socketio.AsyncServer(
     async_mode='asgi',
-    cors_allowed_origins=["http://localhost:3000", "http://192.168.1.36:3000"]
+    cors_allowed_origins=["http://localhost:3000", "http://192.168.1.35:3000"]
 )
 
 # ── FastAPI setup ─────────────────────────────────────────────
