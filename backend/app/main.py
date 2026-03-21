@@ -125,6 +125,12 @@ async def video_ready(sid, data):
     if room_id:
         await sio.emit('peer_ready', {}, room=room_id, skip_sid=sid)
 
+@sio.event
+async def chat_message(sid, data):
+    room_id = data.get('room_id')
+    if room_id:
+        await sio.emit('chat_message', data, room=room_id, skip_sid=sid)
+
 # ── Combine FastAPI + Socket.IO ───────────────────────────────
 socket_app = socketio.ASGIApp(sio, app)
 app.include_router(rooms_router)
