@@ -1,6 +1,6 @@
 'use client'
 import SimplePeer from 'simple-peer'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { getSocket, disconnectSocket } from '@/lib/socket'
@@ -39,12 +39,12 @@ export default function RoomPage() {
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // ── Timer state ───────────────────────────────────────────
-  const [timerSeconds, setTimerSeconds] = useState(0)       // current countdown value
+  const [timerSeconds, setTimerSeconds] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
-  const [timerInput, setTimerInput] = useState('45')        // minutes input
+  const [timerInput, setTimerInput] = useState('45')
   const [showTimerInput, setShowTimerInput] = useState(false)
-  const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const timerSecondsRef = useRef(0)                         // ref mirror to avoid stale closure
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const timerSecondsRef = useRef(0)  // always up-to-date, no stale closure
 
   const isRemoteChange = useRef(false)
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -62,69 +62,88 @@ export default function RoomPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
-  // ── Timer logic ───────────────────────────────────────────
+  // ── Timer core — useCallback so identity is stable ────────
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60).toString().padStart(2, '0')
     const s = (secs % 60).toString().padStart(2, '0')
     return `${m}:${s}`
   }
 
-  const startTimer = (seconds: number) => {
-    if (timerRef.current) clearInterval(timerRef.current)
+  // startTimerAt: clears any existing interval and starts fresh from `seconds`
+  const startTimerAt = useCallback((seconds: number) => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
     timerSecondsRef.current = seconds
     setTimerSeconds(seconds)
     setTimerRunning(true)
-    timerRef.current = setInterval(() => {
+    timerIntervalRef.current = setInterval(() => {
       timerSecondsRef.current -= 1
       setTimerSeconds(timerSecondsRef.current)
       if (timerSecondsRef.current <= 0) {
-        clearInterval(timerRef.current!)
+        clearInterval(timerIntervalRef.current!)
+        timerIntervalRef.current = null
         setTimerRunning(false)
         timerSecondsRef.current = 0
+        setTimerSeconds(0)
       }
     }, 1000)
-  }
+  }, [])  // no deps — only uses refs and setters which are stable
 
-  const stopTimer = () => {
-    if (timerRef.current) clearInterval(timerRef.current)
+  const pauseTimer = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
     setTimerRunning(false)
-  }
+    // timerSecondsRef.current keeps its value — used on resume
+  }, [])
 
-  const resetTimer = () => {
-    stopTimer()
-    setTimerSeconds(0)
+  const resetTimerFn = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
     timerSecondsRef.current = 0
-  }
+    setTimerSeconds(0)
+    setTimerRunning(false)
+  }, [])
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current) }
+  }, [])
+
+  // ── Timer UI handlers — emit socket + run locally ─────────
   const handleStartTimer = () => {
     const mins = parseInt(timerInput)
     if (isNaN(mins) || mins <= 0) return
     const secs = mins * 60
-    startTimer(secs)
+    startTimerAt(secs)
     setShowTimerInput(false)
-    // Sync with other person
     getSocket().emit('timer_start', { room_id: roomId, seconds: secs })
   }
 
-  const handleStopTimer = () => {
-    stopTimer()
+  const handleResumeTimer = () => {
+    const secs = timerSecondsRef.current  // exact remaining — ref never stale
+    startTimerAt(secs)
+    getSocket().emit('timer_resume', { room_id: roomId, seconds: secs })
+  }
+
+  const handlePauseTimer = () => {
+    pauseTimer()
     getSocket().emit('timer_stop', { room_id: roomId })
   }
 
   const handleResetTimer = () => {
-    resetTimer()
+    resetTimerFn()
     getSocket().emit('timer_reset', { room_id: roomId })
   }
 
-  // Cleanup timer on unmount
-  useEffect(() => {
-    return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [])
-
-  // Timer color based on time left
   const timerColor = timerSeconds <= 60 && timerSeconds > 0
     ? 'text-red-400'
-    : timerSeconds <= 300
+    : timerSeconds <= 300 && timerSeconds > 0
       ? 'text-yellow-400'
       : 'text-green-400'
 
@@ -137,31 +156,18 @@ export default function RoomPage() {
   // ── Video helpers ─────────────────────────────────────────
   const resetVideo = (ref: React.RefObject<HTMLVideoElement | null>) => {
     if (!ref.current) return
-    ref.current.pause()
-    ref.current.srcObject = null
-    ref.current.removeAttribute('src')
-    ref.current.load()
+    ref.current.pause(); ref.current.srcObject = null
+    ref.current.removeAttribute('src'); ref.current.load()
   }
-
   const attachStream = (ref: React.RefObject<HTMLVideoElement | null>, stream: MediaStream, muted = false) => {
     if (!ref.current) return
-    ref.current.srcObject = stream
-    ref.current.muted = muted
+    ref.current.srcObject = stream; ref.current.muted = muted
     ref.current.play().catch(err => console.warn('Autoplay blocked:', err))
   }
-
   const destroyPeer = () => {
-    if (peerRef.current) {
-      peerRef.current.removeAllListeners()
-      peerRef.current.destroy()
-      peerRef.current = null
-    }
+    if (peerRef.current) { peerRef.current.removeAllListeners(); peerRef.current.destroy(); peerRef.current = null }
   }
-
-  const clearRemoteVideo = () => {
-    resetVideo(remoteVideoRef)
-    showRemoteOverlay()
-  }
+  const clearRemoteVideo = () => { resetVideo(remoteVideoRef); showRemoteOverlay() }
 
   // ── Create WebRTC peer ────────────────────────────────────
   const createPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
@@ -184,14 +190,11 @@ export default function RoomPage() {
     peerRef.current = peer
   }
 
-  // ── Socket.IO ─────────────────────────────────────────────
+  // ── Socket.IO — stable deps via useCallback timer fns ─────
   useEffect(() => {
     const socket = getSocket()
 
-    socket.on('connect', () => {
-      setConnected(true)
-      socket.emit('join_room', { room_id: roomId, username })
-    })
+    socket.on('connect', () => { setConnected(true); socket.emit('join_room', { room_id: roomId, username }) })
     socket.on('disconnect', () => setConnected(false))
     socket.on('room_full', (data: any) => { alert(data.message); router.push('/') })
     socket.on('room_joined', (data: any) => {
@@ -214,17 +217,18 @@ export default function RoomPage() {
     socket.on('language_updated', (data: any) => setLanguage(data.language))
     socket.on('webrtc_offer', (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
     socket.on('webrtc_answer', (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
-    socket.on('peer_ready', () => { console.log('🔔 peer_ready'); createPeer(false, localStreamRef.current, socket) })
-    socket.on('remote_video_stopped', () => { console.log('🔕 Remote stopped'); clearRemoteVideo() })
+    socket.on('peer_ready', () => { createPeer(false, localStreamRef.current, socket) })
+    socket.on('remote_video_stopped', () => clearRemoteVideo())
     socket.on('chat_message', (data: any) => {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       setChatMessages(prev => [...prev, { sender: data.sender, text: data.text, time, self: false }])
     })
 
-    // ── Timer sync events ─────────────────────────────────
-    socket.on('timer_start', (data: any) => { startTimer(data.seconds) })
-    socket.on('timer_stop', () => { stopTimer() })
-    socket.on('timer_reset', () => { resetTimer() })
+    // Timer — all handlers call stable useCallback functions, zero stale closure risk
+    socket.on('timer_start',  (data: any) => { startTimerAt(data.seconds) })
+    socket.on('timer_resume', (data: any) => { startTimerAt(data.seconds) })
+    socket.on('timer_stop',   ()           => { pauseTimer() })
+    socket.on('timer_reset',  ()           => { resetTimerFn() })
 
     socket.on('whiteboard_updated', (data: any) => {
       const canvas = canvasRef.current; if (!canvas) return
@@ -234,7 +238,7 @@ export default function RoomPage() {
     })
 
     return () => { disconnectSocket() }
-  }, [roomId, username])
+  }, [roomId, username, startTimerAt, pauseTimer, resetTimerFn])
 
   // ── Whiteboard ────────────────────────────────────────────
   useEffect(() => {
@@ -272,7 +276,7 @@ export default function RoomPage() {
     }
   }, [activeTab, brushColor, brushSize, roomId])
 
-  // ── Handlers ──────────────────────────────────────────────
+  // ── Misc handlers ─────────────────────────────────────────
   const handleCodeChange = (value: string | undefined) => {
     const newCode = value || ''; setCode(newCode)
     if (!isRemoteChange.current) getSocket().emit('code_change', { room_id: roomId, code: newCode })
@@ -338,7 +342,10 @@ export default function RoomPage() {
     const parts = line.split(/\*\*(.*?)\*\*/g)
     return (
       <p key={i} className={line.startsWith('**') ? 'mt-3 mb-1' : 'mb-1 text-gray-400'}>
-        {parts.map((part, j) => j % 2 === 1 ? <span key={j} className="font-bold text-white">{part}</span> : <span key={j}>{part}</span>)}
+        {parts.map((part, j) => j % 2 === 1
+          ? <span key={j} className="font-bold text-white">{part}</span>
+          : <span key={j}>{part}</span>
+        )}
       </p>
     )
   })
@@ -350,8 +357,6 @@ export default function RoomPage() {
 
       {/* ── Top Bar ── */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800">
-
-        {/* Left: branding + room ID */}
         <div className="flex items-center gap-3">
           <span className="text-blue-400 font-bold">💻 Interview Platform</span>
           <span className="text-gray-500">|</span>
@@ -361,49 +366,38 @@ export default function RoomPage() {
           </button>
         </div>
 
-        {/* Center: Timer */}
+        {/* Timer */}
         <div className="flex items-center gap-2">
           {timerSeconds > 0 || timerRunning ? (
             <>
-              {/* Countdown display */}
               <span className={`font-mono text-lg font-bold tabular-nums ${timerColor} ${timerSeconds <= 60 && timerRunning ? 'animate-pulse' : ''}`}>
                 ⏱ {formatTime(timerSeconds)}
               </span>
-              {timerRunning ? (
-                <button onClick={handleStopTimer} className="text-xs px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded transition">Pause</button>
-              ) : (
-                <button onClick={() => startTimer(timerSeconds)} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">Resume</button>
-              )}
+              {timerRunning
+                ? <button onClick={handlePauseTimer} className="text-xs px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded transition">Pause</button>
+                : <button onClick={handleResumeTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">Resume</button>
+              }
               <button onClick={handleResetTimer} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">Reset</button>
             </>
           ) : (
-            <>
-              {showTimerInput ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={timerInput}
-                    onChange={e => setTimerInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleStartTimer()}
-                    className="w-16 bg-gray-800 text-white text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500 text-center"
-                    placeholder="min"
-                    min="1"
-                    max="180"
-                  />
-                  <span className="text-gray-400 text-xs">min</span>
-                  <button onClick={handleStartTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
-                  <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">✕</button>
-                </div>
-              ) : (
-                <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition flex items-center gap-1.5">
-                  ⏱ Set Timer
-                </button>
-              )}
-            </>
+            showTimerInput ? (
+              <div className="flex items-center gap-2">
+                <input type="number" value={timerInput} onChange={e => setTimerInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleStartTimer()}
+                  className="w-16 bg-gray-800 text-white text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500 text-center"
+                  placeholder="min" min="1" max="180" />
+                <span className="text-gray-400 text-xs">min</span>
+                <button onClick={handleStartTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
+                <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">✕</button>
+              </div>
+            ) : (
+              <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">
+                ⏱ Set Timer
+              </button>
+            )
           )}
         </div>
 
-        {/* Right: user info */}
         <div className="flex items-center gap-3">
           {messages.length > 0 && <span className="text-xs text-gray-400">{messages[messages.length - 1]}</span>}
           <span className="text-gray-400 text-sm">👤 {username}</span>
@@ -417,26 +411,16 @@ export default function RoomPage() {
         {/* ── Left: Video + Chat ── */}
         <div className="w-72 bg-gray-900 border-r border-gray-800 flex flex-col">
           <div className="p-3 flex flex-col gap-3">
-
-            {/* Local video */}
             <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
               <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
               <div ref={localOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
-                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>
-                🎥 Your Video
-              </div>
+                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>🎥 Your Video</div>
             </div>
-
-            {/* Remote video */}
             <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
               <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
               <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
-                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>
-                👤 Participant
-              </div>
+                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>👤 Participant</div>
             </div>
-
-            {/* Video controls */}
             <div className="flex gap-2">
               {!videoActive
                 ? <button onClick={startVideoCall} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium transition">🎥 Start Video</button>
@@ -450,13 +434,10 @@ export default function RoomPage() {
 
           <div className="border-t border-gray-800 mx-3" />
 
-          {/* Chat */}
           <div className="flex flex-col flex-1 overflow-hidden p-3 gap-2">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💬 Chat</div>
             <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
-              {chatMessages.length === 0 && (
-                <div className="text-center text-gray-600 text-xs mt-4">No messages yet. Say hi! 👋</div>
-              )}
+              {chatMessages.length === 0 && <div className="text-center text-gray-600 text-xs mt-4">No messages yet. Say hi! 👋</div>}
               {chatMessages.map((msg, i) => (
                 <div key={i} className={`flex flex-col gap-0.5 ${msg.self ? 'items-end' : 'items-start'}`}>
                   <span className="text-xs text-gray-500 px-1">{msg.self ? 'You' : msg.sender}</span>
@@ -470,18 +451,15 @@ export default function RoomPage() {
             </div>
             <div className="flex gap-2 items-center">
               <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                placeholder="Type a message..."
+                onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Type a message..."
                 className="flex-1 bg-gray-800 text-white text-sm px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 placeholder-gray-500" />
               <button onClick={sendMessage} disabled={!chatInput.trim()}
-                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-sm transition">
-                ➤
-              </button>
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-sm transition">➤</button>
             </div>
           </div>
         </div>
 
-        {/* ── Center: Editor / Whiteboard ── */}
+        {/* ── Center ── */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
             <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>💻 Code Editor</button>
