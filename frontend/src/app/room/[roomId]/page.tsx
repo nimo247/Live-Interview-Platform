@@ -34,11 +34,17 @@ export default function RoomPage() {
   const [feedback, setFeedback] = useState('')
   const [loadingFeedback, setLoadingFeedback] = useState(false)
   const [copied, setCopied] = useState(false)
-
-  // ── Chat state ────────────────────────────────────────────
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // ── Timer state ───────────────────────────────────────────
+  const [timerSeconds, setTimerSeconds] = useState(0)       // current countdown value
+  const [timerRunning, setTimerRunning] = useState(false)
+  const [timerInput, setTimerInput] = useState('45')        // minutes input
+  const [showTimerInput, setShowTimerInput] = useState(false)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const timerSecondsRef = useRef(0)                         // ref mirror to avoid stale closure
 
   const isRemoteChange = useRef(false)
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -51,10 +57,76 @@ export default function RoomPage() {
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
 
-  // ── Auto-scroll chat to bottom ────────────────────────────
+  // ── Auto-scroll chat ──────────────────────────────────────
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
+
+  // ── Timer logic ───────────────────────────────────────────
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0')
+    const s = (secs % 60).toString().padStart(2, '0')
+    return `${m}:${s}`
+  }
+
+  const startTimer = (seconds: number) => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    timerSecondsRef.current = seconds
+    setTimerSeconds(seconds)
+    setTimerRunning(true)
+    timerRef.current = setInterval(() => {
+      timerSecondsRef.current -= 1
+      setTimerSeconds(timerSecondsRef.current)
+      if (timerSecondsRef.current <= 0) {
+        clearInterval(timerRef.current!)
+        setTimerRunning(false)
+        timerSecondsRef.current = 0
+      }
+    }, 1000)
+  }
+
+  const stopTimer = () => {
+    if (timerRef.current) clearInterval(timerRef.current)
+    setTimerRunning(false)
+  }
+
+  const resetTimer = () => {
+    stopTimer()
+    setTimerSeconds(0)
+    timerSecondsRef.current = 0
+  }
+
+  const handleStartTimer = () => {
+    const mins = parseInt(timerInput)
+    if (isNaN(mins) || mins <= 0) return
+    const secs = mins * 60
+    startTimer(secs)
+    setShowTimerInput(false)
+    // Sync with other person
+    getSocket().emit('timer_start', { room_id: roomId, seconds: secs })
+  }
+
+  const handleStopTimer = () => {
+    stopTimer()
+    getSocket().emit('timer_stop', { room_id: roomId })
+  }
+
+  const handleResetTimer = () => {
+    resetTimer()
+    getSocket().emit('timer_reset', { room_id: roomId })
+  }
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [])
+
+  // Timer color based on time left
+  const timerColor = timerSeconds <= 60 && timerSeconds > 0
+    ? 'text-red-400'
+    : timerSeconds <= 300
+      ? 'text-yellow-400'
+      : 'text-green-400'
 
   // ── Overlay helpers ───────────────────────────────────────
   const showLocalOverlay = () => { if (localOverlayRef.current) localOverlayRef.current.style.opacity = '1' }
@@ -78,7 +150,6 @@ export default function RoomPage() {
     ref.current.play().catch(err => console.warn('Autoplay blocked:', err))
   }
 
-  // ── Peer helpers ──────────────────────────────────────────
   const destroyPeer = () => {
     if (peerRef.current) {
       peerRef.current.removeAllListeners()
@@ -96,37 +167,19 @@ export default function RoomPage() {
   const createPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
     console.log(`Creating peer — initiator: ${initiator}, hasStream: ${!!stream}`)
     destroyPeer()
-
     const peerOptions: any = { initiator, trickle: false }
     if (stream) peerOptions.stream = stream
-
     const peer = new SimplePeer(peerOptions)
-
     peer.on('signal', (data) => {
       if (data.type === 'offer') socket.emit('webrtc_offer', { sdp: data, room_id: roomId })
       else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId })
     })
-
     peer.on('stream', (remoteStream) => {
       console.log('🎥 Got remote stream!')
-      setTimeout(() => {
-        attachStream(remoteVideoRef, remoteStream, false)
-        hideRemoteOverlay()
-      }, 200)
+      setTimeout(() => { attachStream(remoteVideoRef, remoteStream, false); hideRemoteOverlay() }, 200)
     })
-
-    peer.on('close', () => {
-      console.log('Peer closed')
-      clearRemoteVideo()
-      peerRef.current = null
-    })
-
-    peer.on('error', (err) => {
-      console.error('Peer error:', err)
-      clearRemoteVideo()
-      peerRef.current = null
-    })
-
+    peer.on('close', () => { console.log('Peer closed'); clearRemoteVideo(); peerRef.current = null })
+    peer.on('error', (err) => { console.error('Peer error:', err); clearRemoteVideo(); peerRef.current = null })
     peer.on('connect', () => console.log('✅ Peer connected!'))
     peerRef.current = peer
   }
@@ -139,118 +192,58 @@ export default function RoomPage() {
       setConnected(true)
       socket.emit('join_room', { room_id: roomId, username })
     })
-
     socket.on('disconnect', () => setConnected(false))
-
-    socket.on('room_full', (data: any) => {
-      alert(data.message)
-      router.push('/')
-    })
-
+    socket.on('room_full', (data: any) => { alert(data.message); router.push('/') })
     socket.on('room_joined', (data: any) => {
       isRemoteChange.current = true
-      setCode(data.code)
-      setLanguage(data.language)
-      setParticipants(data.participants)
+      setCode(data.code); setLanguage(data.language); setParticipants(data.participants)
       isRemoteChange.current = false
     })
-
     socket.on('user_joined', (data: any) => {
       setParticipants(data.participants)
       setMessages(prev => [...prev, `✅ ${data.username} joined`])
     })
-
     socket.on('user_left', () => {
       setParticipants(prev => Math.max(1, prev - 1))
       setMessages(prev => [...prev, `❌ A user left`])
-      clearRemoteVideo()
-      destroyPeer()
+      clearRemoteVideo(); destroyPeer()
     })
-
     socket.on('code_updated', (data: any) => {
-      isRemoteChange.current = true
-      setCode(data.code)
-      isRemoteChange.current = false
+      isRemoteChange.current = true; setCode(data.code); isRemoteChange.current = false
     })
-
     socket.on('language_updated', (data: any) => setLanguage(data.language))
-
-    socket.on('webrtc_offer', (data: any) => {
-      if (peerRef.current) peerRef.current.signal(data.sdp)
-    })
-
-    socket.on('webrtc_answer', (data: any) => {
-      if (peerRef.current) peerRef.current.signal(data.sdp)
-    })
-
-    socket.on('peer_ready', () => {
-      console.log('🔔 peer_ready — non-initiator')
-      createPeer(false, localStreamRef.current, socket)
-    })
-
-    socket.on('remote_video_stopped', () => {
-      console.log('🔕 Remote stopped their camera')
-      clearRemoteVideo()
-    })
-
-    // ── Incoming chat message ─────────────────────────────
+    socket.on('webrtc_offer', (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
+    socket.on('webrtc_answer', (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
+    socket.on('peer_ready', () => { console.log('🔔 peer_ready'); createPeer(false, localStreamRef.current, socket) })
+    socket.on('remote_video_stopped', () => { console.log('🔕 Remote stopped'); clearRemoteVideo() })
     socket.on('chat_message', (data: any) => {
-      const now = new Date()
-      const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      setChatMessages(prev => [...prev, {
-        sender: data.sender,
-        text: data.text,
-        time,
-        self: false
-      }])
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      setChatMessages(prev => [...prev, { sender: data.sender, text: data.text, time, self: false }])
     })
+
+    // ── Timer sync events ─────────────────────────────────
+    socket.on('timer_start', (data: any) => { startTimer(data.seconds) })
+    socket.on('timer_stop', () => { stopTimer() })
+    socket.on('timer_reset', () => { resetTimer() })
 
     socket.on('whiteboard_updated', (data: any) => {
-      const canvas = canvasRef.current
-      if (!canvas) return
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      ctx.beginPath()
-      ctx.moveTo(data.x1, data.y1)
-      ctx.lineTo(data.x2, data.y2)
-      ctx.strokeStyle = data.color
-      ctx.lineWidth = data.size
-      ctx.lineCap = 'round'
-      ctx.stroke()
+      const canvas = canvasRef.current; if (!canvas) return
+      const ctx = canvas.getContext('2d'); if (!ctx) return
+      ctx.beginPath(); ctx.moveTo(data.x1, data.y1); ctx.lineTo(data.x2, data.y2)
+      ctx.strokeStyle = data.color; ctx.lineWidth = data.size; ctx.lineCap = 'round'; ctx.stroke()
     })
 
     return () => { disconnectSocket() }
   }, [roomId, username])
 
-  // ── Send chat message ─────────────────────────────────────
-  const sendMessage = () => {
-    const text = chatInput.trim()
-    if (!text) return
-    const socket = getSocket()
-    const now = new Date()
-    const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    socket.emit('chat_message', { room_id: roomId, sender: username, text })
-    setChatMessages(prev => [...prev, { sender: username, text, time, self: true }])
-    setChatInput('')
-  }
-
-  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') sendMessage()
-  }
-
   // ── Whiteboard ────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'whiteboard') return
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
+    const canvas = canvasRef.current; if (!canvas) return
+    const ctx = canvas.getContext('2d'); if (!ctx) return
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    canvas.width = canvas.offsetWidth
-    canvas.height = canvas.offsetHeight
+    canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight
     ctx.putImageData(imageData, 0, 0)
-
     const getPos = (e: MouseEvent | TouchEvent) => {
       const rect = canvas.getBoundingClientRect()
       if (e instanceof MouseEvent) return { x: e.clientX - rect.left, y: e.clientY - rect.top }
@@ -260,141 +253,105 @@ export default function RoomPage() {
     const draw = (e: MouseEvent | TouchEvent) => {
       if (!isDrawing.current || !lastPos.current) return
       const pos = getPos(e)
-      ctx.beginPath()
-      ctx.moveTo(lastPos.current.x, lastPos.current.y)
-      ctx.lineTo(pos.x, pos.y)
-      ctx.strokeStyle = brushColor
-      ctx.lineWidth = brushSize
-      ctx.lineCap = 'round'
-      ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y)
+      ctx.lineTo(pos.x, pos.y); ctx.strokeStyle = brushColor
+      ctx.lineWidth = brushSize; ctx.lineCap = 'round'; ctx.stroke()
       getSocket().emit('whiteboard_draw', { room_id: roomId, x1: lastPos.current.x, y1: lastPos.current.y, x2: pos.x, y2: pos.y, color: brushColor, size: brushSize })
       lastPos.current = pos
     }
     const stopDraw = () => { isDrawing.current = false; lastPos.current = null }
-
-    canvas.addEventListener('mousedown', startDraw)
-    canvas.addEventListener('mousemove', draw)
-    canvas.addEventListener('mouseup', stopDraw)
-    canvas.addEventListener('mouseleave', stopDraw)
-    canvas.addEventListener('touchstart', startDraw)
-    canvas.addEventListener('touchmove', draw)
+    canvas.addEventListener('mousedown', startDraw); canvas.addEventListener('mousemove', draw)
+    canvas.addEventListener('mouseup', stopDraw); canvas.addEventListener('mouseleave', stopDraw)
+    canvas.addEventListener('touchstart', startDraw); canvas.addEventListener('touchmove', draw)
     canvas.addEventListener('touchend', stopDraw)
     return () => {
-      canvas.removeEventListener('mousedown', startDraw)
-      canvas.removeEventListener('mousemove', draw)
-      canvas.removeEventListener('mouseup', stopDraw)
-      canvas.removeEventListener('mouseleave', stopDraw)
-      canvas.removeEventListener('touchstart', startDraw)
-      canvas.removeEventListener('touchmove', draw)
+      canvas.removeEventListener('mousedown', startDraw); canvas.removeEventListener('mousemove', draw)
+      canvas.removeEventListener('mouseup', stopDraw); canvas.removeEventListener('mouseleave', stopDraw)
+      canvas.removeEventListener('touchstart', startDraw); canvas.removeEventListener('touchmove', draw)
       canvas.removeEventListener('touchend', stopDraw)
     }
   }, [activeTab, brushColor, brushSize, roomId])
 
-  // ── Code handlers ─────────────────────────────────────────
+  // ── Handlers ──────────────────────────────────────────────
   const handleCodeChange = (value: string | undefined) => {
-    const newCode = value || ''
-    setCode(newCode)
+    const newCode = value || ''; setCode(newCode)
     if (!isRemoteChange.current) getSocket().emit('code_change', { room_id: roomId, code: newCode })
   }
-
   const handleLanguageChange = (newLang: string) => {
-    setLanguage(newLang)
-    getSocket().emit('language_change', { room_id: roomId, language: newLang })
+    setLanguage(newLang); getSocket().emit('language_change', { room_id: roomId, language: newLang })
   }
-
-  // ── Copy ID ───────────────────────────────────────────────
   const copyRoomId = () => {
-    try {
-      navigator.clipboard.writeText(roomId).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
-    } catch {
-      const el = document.createElement('textarea')
-      el.value = roomId; el.style.position = 'fixed'; el.style.opacity = '0'
+    try { navigator.clipboard.writeText(roomId).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }) }
+    catch {
+      const el = document.createElement('textarea'); el.value = roomId
+      el.style.position = 'fixed'; el.style.opacity = '0'
       document.body.appendChild(el); el.focus(); el.select()
       document.execCommand('copy'); document.body.removeChild(el)
       setCopied(true); setTimeout(() => setCopied(false), 2000)
     }
   }
-
-  // ── WebRTC ────────────────────────────────────────────────
   const startVideoCall = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      localStreamRef.current = stream
-      setVideoActive(true)
-      attachStream(localVideoRef, stream, true)
-      hideLocalOverlay()
-      const socket = getSocket()
-      createPeer(true, stream, socket)
+      localStreamRef.current = stream; setVideoActive(true)
+      attachStream(localVideoRef, stream, true); hideLocalOverlay()
+      const socket = getSocket(); createPeer(true, stream, socket)
       socket.emit('video_ready', { room_id: roomId })
-    } catch {
-      alert('Could not access camera/microphone. Please allow permissions!')
-    }
+    } catch { alert('Could not access camera/microphone. Please allow permissions!') }
   }
-
   const stopVideo = () => {
     if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop())
-    resetVideo(localVideoRef)
-    showLocalOverlay()
-    localStreamRef.current = null
-    setVideoActive(false)
+    resetVideo(localVideoRef); showLocalOverlay()
+    localStreamRef.current = null; setVideoActive(false)
     getSocket().emit('video_stopped', { room_id: roomId })
-    // DO NOT destroyPeer() here
   }
-
   const toggleMute = () => {
     if (localStreamRef.current) {
       localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled })
       setMuted(prev => !prev)
     }
   }
-
   const clearCanvas = () => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const canvas = canvasRef.current; if (!canvas) return
+    const ctx = canvas.getContext('2d'); if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
   }
-
-  // ── AI Feedback ───────────────────────────────────────────
+  const sendMessage = () => {
+    const text = chatInput.trim(); if (!text) return
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    getSocket().emit('chat_message', { room_id: roomId, sender: username, text })
+    setChatMessages(prev => [...prev, { sender: username, text, time, self: true }])
+    setChatInput('')
+  }
   const getAIFeedback = async () => {
     setFeedback(''); setLoadingFeedback(true)
     try {
       const res = await fetch('http://localhost:8000/rooms/ai-feedback', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language })
       })
-      const data = await res.json()
-      setFeedback(data.feedback)
-    } catch {
-      setFeedback('❌ Error getting feedback. Is the backend running?')
-    } finally {
-      setLoadingFeedback(false)
-    }
+      const data = await res.json(); setFeedback(data.feedback)
+    } catch { setFeedback('❌ Error getting feedback. Is the backend running?') }
+    finally { setLoadingFeedback(false) }
   }
-
-  const renderFeedback = (text: string) => {
-    return text.split('\n').map((line, i) => {
-      if (!line.trim()) return <div key={i} className="h-2" />
-      const parts = line.split(/\*\*(.*?)\*\*/g)
-      return (
-        <p key={i} className={line.startsWith('**') ? 'mt-3 mb-1' : 'mb-1 text-gray-400'}>
-          {parts.map((part, j) => j % 2 === 1
-            ? <span key={j} className="font-bold text-white">{part}</span>
-            : <span key={j}>{part}</span>
-          )}
-        </p>
-      )
-    })
-  }
+  const renderFeedback = (text: string) => text.split('\n').map((line, i) => {
+    if (!line.trim()) return <div key={i} className="h-2" />
+    const parts = line.split(/\*\*(.*?)\*\*/g)
+    return (
+      <p key={i} className={line.startsWith('**') ? 'mt-3 mb-1' : 'mb-1 text-gray-400'}>
+        {parts.map((part, j) => j % 2 === 1 ? <span key={j} className="font-bold text-white">{part}</span> : <span key={j}>{part}</span>)}
+      </p>
+    )
+  })
 
   const languages = ['javascript', 'typescript', 'python', 'java', 'cpp', 'go']
 
   return (
     <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
 
-      {/* Top Bar */}
+      {/* ── Top Bar ── */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800">
+
+        {/* Left: branding + room ID */}
         <div className="flex items-center gap-3">
           <span className="text-blue-400 font-bold">💻 Interview Platform</span>
           <span className="text-gray-500">|</span>
@@ -403,6 +360,50 @@ export default function RoomPage() {
             {copied ? '✅ Copied!' : 'Copy ID'}
           </button>
         </div>
+
+        {/* Center: Timer */}
+        <div className="flex items-center gap-2">
+          {timerSeconds > 0 || timerRunning ? (
+            <>
+              {/* Countdown display */}
+              <span className={`font-mono text-lg font-bold tabular-nums ${timerColor} ${timerSeconds <= 60 && timerRunning ? 'animate-pulse' : ''}`}>
+                ⏱ {formatTime(timerSeconds)}
+              </span>
+              {timerRunning ? (
+                <button onClick={handleStopTimer} className="text-xs px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded transition">Pause</button>
+              ) : (
+                <button onClick={() => startTimer(timerSeconds)} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">Resume</button>
+              )}
+              <button onClick={handleResetTimer} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">Reset</button>
+            </>
+          ) : (
+            <>
+              {showTimerInput ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={timerInput}
+                    onChange={e => setTimerInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleStartTimer()}
+                    className="w-16 bg-gray-800 text-white text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500 text-center"
+                    placeholder="min"
+                    min="1"
+                    max="180"
+                  />
+                  <span className="text-gray-400 text-xs">min</span>
+                  <button onClick={handleStartTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
+                  <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">✕</button>
+                </div>
+              ) : (
+                <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition flex items-center gap-1.5">
+                  ⏱ Set Timer
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Right: user info */}
         <div className="flex items-center gap-3">
           {messages.length > 0 && <span className="text-xs text-gray-400">{messages[messages.length - 1]}</span>}
           <span className="text-gray-400 text-sm">👤 {username}</span>
@@ -413,11 +414,10 @@ export default function RoomPage() {
 
       <div className="flex flex-1 overflow-hidden">
 
-        {/* Left Panel — Video + Chat */}
+        {/* ── Left: Video + Chat ── */}
         <div className="w-72 bg-gray-900 border-r border-gray-800 flex flex-col">
-
-          {/* Videos */}
           <div className="p-3 flex flex-col gap-3">
+
             {/* Local video */}
             <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
               <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
@@ -448,67 +448,44 @@ export default function RoomPage() {
             </div>
           </div>
 
-          {/* Divider */}
           <div className="border-t border-gray-800 mx-3" />
 
           {/* Chat */}
           <div className="flex flex-col flex-1 overflow-hidden p-3 gap-2">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💬 Chat</div>
-
-            {/* Messages */}
             <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
               {chatMessages.length === 0 && (
                 <div className="text-center text-gray-600 text-xs mt-4">No messages yet. Say hi! 👋</div>
               )}
               {chatMessages.map((msg, i) => (
                 <div key={i} className={`flex flex-col gap-0.5 ${msg.self ? 'items-end' : 'items-start'}`}>
-                  {/* Sender name */}
                   <span className="text-xs text-gray-500 px-1">{msg.self ? 'You' : msg.sender}</span>
-                  {/* Bubble */}
-                  <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-snug break-words ${
-                    msg.self
-                      ? 'bg-blue-600 text-white rounded-tr-sm'
-                      : 'bg-gray-700 text-gray-100 rounded-tl-sm'
-                  }`}>
+                  <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-snug break-words ${msg.self ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-700 text-gray-100 rounded-tl-sm'}`}>
                     {msg.text}
                   </div>
-                  {/* Time */}
                   <span className="text-xs text-gray-600 px-1">{msg.time}</span>
                 </div>
               ))}
               <div ref={chatEndRef} />
             </div>
-
-            {/* Input */}
             <div className="flex gap-2 items-center">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={handleChatKeyDown}
+              <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendMessage()}
                 placeholder="Type a message..."
-                className="flex-1 bg-gray-800 text-white text-sm px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 placeholder-gray-500"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!chatInput.trim()}
-                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-sm transition"
-              >
+                className="flex-1 bg-gray-800 text-white text-sm px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 placeholder-gray-500" />
+              <button onClick={sendMessage} disabled={!chatInput.trim()}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-sm transition">
                 ➤
               </button>
             </div>
           </div>
         </div>
 
-        {/* Center — Editor / Whiteboard */}
+        {/* ── Center: Editor / Whiteboard ── */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
-            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-              💻 Code Editor
-            </button>
-            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-              🎨 Whiteboard
-            </button>
+            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>💻 Code Editor</button>
+            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>🎨 Whiteboard</button>
             {activeTab === 'code' && (
               <select value={language} onChange={e => handleLanguageChange(e.target.value)}
                 className="ml-auto bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700">
@@ -516,14 +493,12 @@ export default function RoomPage() {
               </select>
             )}
           </div>
-
           {activeTab === 'code' && (
             <div className="flex-1">
               <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs-dark"
                 options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
             </div>
           )}
-
           {activeTab === 'whiteboard' && (
             <div className="flex-1 bg-white relative">
               <canvas ref={canvasRef} className="w-full h-full" style={{ touchAction: 'none', cursor: 'crosshair' }} />
@@ -544,7 +519,7 @@ export default function RoomPage() {
           )}
         </div>
 
-        {/* Right — AI Feedback */}
+        {/* ── Right: AI Feedback ── */}
         <div className="w-72 bg-gray-900 border-l border-gray-800 flex flex-col">
           <div className="p-3 border-b border-gray-800">
             <h3 className="text-sm font-semibold text-gray-300">🤖 AI Feedback</h3>
