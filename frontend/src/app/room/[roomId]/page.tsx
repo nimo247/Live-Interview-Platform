@@ -7,6 +7,13 @@ import { getSocket, disconnectSocket } from '@/lib/socket'
 
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })
 
+interface ChatMessage {
+  sender: string
+  text: string
+  time: string
+  self: boolean
+}
+
 export default function RoomPage() {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -28,6 +35,11 @@ export default function RoomPage() {
   const [loadingFeedback, setLoadingFeedback] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  // ── Chat state ────────────────────────────────────────────
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
   const isRemoteChange = useRef(false)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
@@ -39,30 +51,26 @@ export default function RoomPage() {
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
 
-  // ── Show / hide overlays directly on DOM (no React re-render) ──
-  const showLocalOverlay = () => {
-    if (localOverlayRef.current) localOverlayRef.current.style.opacity = '1'
-  }
-  const hideLocalOverlay = () => {
-    if (localOverlayRef.current) localOverlayRef.current.style.opacity = '0'
-  }
-  const showRemoteOverlay = () => {
-    if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '1'
-  }
-  const hideRemoteOverlay = () => {
-    if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '0'
-  }
+  // ── Auto-scroll chat to bottom ────────────────────────────
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages])
 
-  // ── Fully reset a video element ───────────────────────────
+  // ── Overlay helpers ───────────────────────────────────────
+  const showLocalOverlay = () => { if (localOverlayRef.current) localOverlayRef.current.style.opacity = '1' }
+  const hideLocalOverlay = () => { if (localOverlayRef.current) localOverlayRef.current.style.opacity = '0' }
+  const showRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '1' }
+  const hideRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '0' }
+
+  // ── Video helpers ─────────────────────────────────────────
   const resetVideo = (ref: React.RefObject<HTMLVideoElement | null>) => {
     if (!ref.current) return
     ref.current.pause()
     ref.current.srcObject = null
-    ref.current.src = ''
+    ref.current.removeAttribute('src')
     ref.current.load()
   }
 
-  // ── Attach stream to video element ────────────────────────
   const attachStream = (ref: React.RefObject<HTMLVideoElement | null>, stream: MediaStream, muted = false) => {
     if (!ref.current) return
     ref.current.srcObject = stream
@@ -70,7 +78,7 @@ export default function RoomPage() {
     ref.current.play().catch(err => console.warn('Autoplay blocked:', err))
   }
 
-  // ── Destroy peer cleanly ──────────────────────────────────
+  // ── Peer helpers ──────────────────────────────────────────
   const destroyPeer = () => {
     if (peerRef.current) {
       peerRef.current.removeAllListeners()
@@ -79,7 +87,6 @@ export default function RoomPage() {
     }
   }
 
-  // ── Clear remote video + show placeholder ─────────────────
   const clearRemoteVideo = () => {
     resetVideo(remoteVideoRef)
     showRemoteOverlay()
@@ -177,13 +184,25 @@ export default function RoomPage() {
     })
 
     socket.on('peer_ready', () => {
-      console.log('🔔 peer_ready — non-initiator, my stream:', !!localStreamRef.current)
+      console.log('🔔 peer_ready — non-initiator')
       createPeer(false, localStreamRef.current, socket)
     })
 
     socket.on('remote_video_stopped', () => {
-      console.log('🔕 Remote video stopped')
+      console.log('🔕 Remote stopped their camera')
       clearRemoteVideo()
+    })
+
+    // ── Incoming chat message ─────────────────────────────
+    socket.on('chat_message', (data: any) => {
+      const now = new Date()
+      const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      setChatMessages(prev => [...prev, {
+        sender: data.sender,
+        text: data.text,
+        time,
+        self: false
+      }])
     })
 
     socket.on('whiteboard_updated', (data: any) => {
@@ -203,7 +222,23 @@ export default function RoomPage() {
     return () => { disconnectSocket() }
   }, [roomId, username])
 
-  // ── Whiteboard canvas setup ───────────────────────────────
+  // ── Send chat message ─────────────────────────────────────
+  const sendMessage = () => {
+    const text = chatInput.trim()
+    if (!text) return
+    const socket = getSocket()
+    const now = new Date()
+    const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    socket.emit('chat_message', { room_id: roomId, sender: username, text })
+    setChatMessages(prev => [...prev, { sender: username, text, time, self: true }])
+    setChatInput('')
+  }
+
+  const handleChatKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') sendMessage()
+  }
+
+  // ── Whiteboard ────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'whiteboard') return
     const canvas = canvasRef.current
@@ -221,7 +256,6 @@ export default function RoomPage() {
       if (e instanceof MouseEvent) return { x: e.clientX - rect.left, y: e.clientY - rect.top }
       return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }
     }
-
     const startDraw = (e: MouseEvent | TouchEvent) => { isDrawing.current = true; lastPos.current = getPos(e) }
     const draw = (e: MouseEvent | TouchEvent) => {
       if (!isDrawing.current || !lastPos.current) return
@@ -233,8 +267,7 @@ export default function RoomPage() {
       ctx.lineWidth = brushSize
       ctx.lineCap = 'round'
       ctx.stroke()
-      const socket = getSocket()
-      socket.emit('whiteboard_draw', { room_id: roomId, x1: lastPos.current.x, y1: lastPos.current.y, x2: pos.x, y2: pos.y, color: brushColor, size: brushSize })
+      getSocket().emit('whiteboard_draw', { room_id: roomId, x1: lastPos.current.x, y1: lastPos.current.y, x2: pos.x, y2: pos.y, color: brushColor, size: brushSize })
       lastPos.current = pos
     }
     const stopDraw = () => { isDrawing.current = false; lastPos.current = null }
@@ -246,7 +279,6 @@ export default function RoomPage() {
     canvas.addEventListener('touchstart', startDraw)
     canvas.addEventListener('touchmove', draw)
     canvas.addEventListener('touchend', stopDraw)
-
     return () => {
       canvas.removeEventListener('mousedown', startDraw)
       canvas.removeEventListener('mousemove', draw)
@@ -262,37 +294,24 @@ export default function RoomPage() {
   const handleCodeChange = (value: string | undefined) => {
     const newCode = value || ''
     setCode(newCode)
-    if (!isRemoteChange.current) {
-      const socket = getSocket()
-      socket.emit('code_change', { room_id: roomId, code: newCode })
-    }
+    if (!isRemoteChange.current) getSocket().emit('code_change', { room_id: roomId, code: newCode })
   }
 
-  const handleLanguageChange = (newLanguage: string) => {
-    setLanguage(newLanguage)
-    const socket = getSocket()
-    socket.emit('language_change', { room_id: roomId, language: newLanguage })
+  const handleLanguageChange = (newLang: string) => {
+    setLanguage(newLang)
+    getSocket().emit('language_change', { room_id: roomId, language: newLang })
   }
 
-  // ── Copy room ID ──────────────────────────────────────────
+  // ── Copy ID ───────────────────────────────────────────────
   const copyRoomId = () => {
     try {
-      navigator.clipboard.writeText(roomId).then(() => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      })
+      navigator.clipboard.writeText(roomId).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
     } catch {
       const el = document.createElement('textarea')
-      el.value = roomId
-      el.style.position = 'fixed'
-      el.style.opacity = '0'
-      document.body.appendChild(el)
-      el.focus()
-      el.select()
-      document.execCommand('copy')
-      document.body.removeChild(el)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      el.value = roomId; el.style.position = 'fixed'; el.style.opacity = '0'
+      document.body.appendChild(el); el.focus(); el.select()
+      document.execCommand('copy'); document.body.removeChild(el)
+      setCopied(true); setTimeout(() => setCopied(false), 2000)
     }
   }
 
@@ -312,21 +331,21 @@ export default function RoomPage() {
     }
   }
 
-  const toggleMute = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled })
-      setMuted(prev => !prev)
-    }
-  }
-
   const stopVideo = () => {
     if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop())
     resetVideo(localVideoRef)
     showLocalOverlay()
     localStreamRef.current = null
     setVideoActive(false)
-    const socket = getSocket()
-    socket.emit('video_stopped', { room_id: roomId })
+    getSocket().emit('video_stopped', { room_id: roomId })
+    // DO NOT destroyPeer() here
+  }
+
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled })
+      setMuted(prev => !prev)
+    }
   }
 
   const clearCanvas = () => {
@@ -338,10 +357,9 @@ export default function RoomPage() {
 
   // ── AI Feedback ───────────────────────────────────────────
   const getAIFeedback = async () => {
-    setFeedback('')
-    setLoadingFeedback(true)
+    setFeedback(''); setLoadingFeedback(true)
     try {
-      const res = await fetch('http://192.168.1.35:8000/rooms/ai-feedback', {
+      const res = await fetch('http://localhost:8000/rooms/ai-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language })
@@ -355,16 +373,15 @@ export default function RoomPage() {
     }
   }
 
-  // ── Markdown renderer ─────────────────────────────────────
   const renderFeedback = (text: string) => {
     return text.split('\n').map((line, i) => {
       if (!line.trim()) return <div key={i} className="h-2" />
       const parts = line.split(/\*\*(.*?)\*\*/g)
-      const isHeader = line.startsWith('**')
       return (
-        <p key={i} className={isHeader ? 'mt-3 mb-1' : 'mb-1 text-gray-400'}>
-          {parts.map((part, j) =>
-            j % 2 === 1 ? <span key={j} className="font-bold text-white">{part}</span> : <span key={j}>{part}</span>
+        <p key={i} className={line.startsWith('**') ? 'mt-3 mb-1' : 'mb-1 text-gray-400'}>
+          {parts.map((part, j) => j % 2 === 1
+            ? <span key={j} className="font-bold text-white">{part}</span>
+            : <span key={j}>{part}</span>
           )}
         </p>
       )
@@ -382,111 +399,119 @@ export default function RoomPage() {
           <span className="text-blue-400 font-bold">💻 Interview Platform</span>
           <span className="text-gray-500">|</span>
           <span className="text-gray-400 text-sm">Room: <span className="text-white font-mono">{roomId}</span></span>
-          <button
-            onClick={copyRoomId}
-            className={`text-xs px-2 py-1 rounded transition ${copied ? 'bg-green-700 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}
-          >
+          <button onClick={copyRoomId} className={`text-xs px-2 py-1 rounded transition ${copied ? 'bg-green-700 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}>
             {copied ? '✅ Copied!' : 'Copy ID'}
           </button>
         </div>
         <div className="flex items-center gap-3">
-          {messages.length > 0 && (
-            <span className="text-xs text-gray-400">{messages[messages.length - 1]}</span>
-          )}
+          {messages.length > 0 && <span className="text-xs text-gray-400">{messages[messages.length - 1]}</span>}
           <span className="text-gray-400 text-sm">👤 {username}</span>
           <span className="text-gray-400 text-sm">🟢 {participants} online</span>
           <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`} />
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">
 
-        {/* Left — Video Panel */}
-        <div className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col p-3 gap-3">
+        {/* Left Panel — Video + Chat */}
+        <div className="w-72 bg-gray-900 border-r border-gray-800 flex flex-col">
 
-          {/* Local video */}
-          <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
-            <video
-              ref={localVideoRef}
-              autoPlay
-              muted
-              playsInline
-              className="w-full h-full object-cover"
-            />
-            {/* Overlay: starts visible (opacity 1), hidden when video active */}
-            <div
-              ref={localOverlayRef}
-              className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
-              style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}
-            >
-              🎥 Your Video
+          {/* Videos */}
+          <div className="p-3 flex flex-col gap-3">
+            {/* Local video */}
+            <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
+              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              <div ref={localOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
+                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>
+                🎥 Your Video
+              </div>
+            </div>
+
+            {/* Remote video */}
+            <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
+              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+              <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
+                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>
+                👤 Participant
+              </div>
+            </div>
+
+            {/* Video controls */}
+            <div className="flex gap-2">
+              {!videoActive
+                ? <button onClick={startVideoCall} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium transition">🎥 Start Video</button>
+                : <button onClick={stopVideo} className="flex-1 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition">⏹ Stop Video</button>
+              }
+              <button onClick={toggleMute} className={`flex-1 py-2 rounded-lg text-xs transition ${muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}>
+                {muted ? '🔇 Unmute' : '🎤 Mute'}
+              </button>
             </div>
           </div>
 
-          {/* Remote video */}
-          <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
-            <video
-              ref={remoteVideoRef}
-              autoPlay
-              playsInline
-              className="w-full h-full object-cover"
-            />
-            {/* Overlay: starts visible (opacity 1), hidden when remote stream active */}
-            <div
-              ref={remoteOverlayRef}
-              className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
-              style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}
-            >
-              👤 Participant
+          {/* Divider */}
+          <div className="border-t border-gray-800 mx-3" />
+
+          {/* Chat */}
+          <div className="flex flex-col flex-1 overflow-hidden p-3 gap-2">
+            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💬 Chat</div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
+              {chatMessages.length === 0 && (
+                <div className="text-center text-gray-600 text-xs mt-4">No messages yet. Say hi! 👋</div>
+              )}
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex flex-col gap-0.5 ${msg.self ? 'items-end' : 'items-start'}`}>
+                  {/* Sender name */}
+                  <span className="text-xs text-gray-500 px-1">{msg.self ? 'You' : msg.sender}</span>
+                  {/* Bubble */}
+                  <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-snug break-words ${
+                    msg.self
+                      ? 'bg-blue-600 text-white rounded-tr-sm'
+                      : 'bg-gray-700 text-gray-100 rounded-tl-sm'
+                  }`}>
+                    {msg.text}
+                  </div>
+                  {/* Time */}
+                  <span className="text-xs text-gray-600 px-1">{msg.time}</span>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
             </div>
-          </div>
 
-          {!videoActive ? (
-            <button onClick={startVideoCall} className="w-full py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition">
-              🎥 Start Video Call
-            </button>
-          ) : (
-            <button onClick={stopVideo} className="w-full py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-medium transition">
-              ⏹ Stop Video
-            </button>
-          )}
-
-          <button
-            onClick={toggleMute}
-            className={`w-full py-2 rounded-lg text-sm transition ${muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}
-          >
-            {muted ? '🔇 Unmute' : '🎤 Mute'}
-          </button>
-
-          <div className="flex-1 overflow-y-auto">
-            {messages.map((msg, i) => (
-              <div key={i} className="text-xs text-gray-500 py-1 border-b border-gray-800">{msg}</div>
-            ))}
+            {/* Input */}
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={handleChatKeyDown}
+                placeholder="Type a message..."
+                className="flex-1 bg-gray-800 text-white text-sm px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 placeholder-gray-500"
+              />
+              <button
+                onClick={sendMessage}
+                disabled={!chatInput.trim()}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-sm transition"
+              >
+                ➤
+              </button>
+            </div>
           </div>
         </div>
 
         {/* Center — Editor / Whiteboard */}
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
-            <button
-              onClick={() => setActiveTab('code')}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
+            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
               💻 Code Editor
             </button>
-            <button
-              onClick={() => setActiveTab('whiteboard')}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
-            >
+            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
               🎨 Whiteboard
             </button>
             {activeTab === 'code' && (
-              <select
-                value={language}
-                onChange={e => handleLanguageChange(e.target.value)}
-                className="ml-auto bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700"
-              >
+              <select value={language} onChange={e => handleLanguageChange(e.target.value)}
+                className="ml-auto bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700">
                 {languages.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
             )}
@@ -494,14 +519,8 @@ export default function RoomPage() {
 
           {activeTab === 'code' && (
             <div className="flex-1">
-              <MonacoEditor
-                height="100%"
-                language={language}
-                value={code}
-                onChange={handleCodeChange}
-                theme="vs-dark"
-                options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }}
-              />
+              <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs-dark"
+                options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
             </div>
           )}
 
@@ -510,30 +529,16 @@ export default function RoomPage() {
               <canvas ref={canvasRef} className="w-full h-full" style={{ touchAction: 'none', cursor: 'crosshair' }} />
               <div className="absolute top-3 left-3 flex items-center gap-2 bg-white rounded-lg shadow-md p-2 border border-gray-200">
                 {['#000000', '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#ffffff'].map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setBrushColor(color)}
-                    className="w-7 h-7 rounded-full border-2 shadow transition"
-                    style={{
-                      backgroundColor: color,
-                      borderColor: brushColor === color ? '#6366f1' : '#e5e7eb',
-                      transform: brushColor === color ? 'scale(1.2)' : 'scale(1)'
-                    }}
-                  />
+                  <button key={color} onClick={() => setBrushColor(color)} className="w-7 h-7 rounded-full border-2 shadow transition"
+                    style={{ backgroundColor: color, borderColor: brushColor === color ? '#6366f1' : '#e5e7eb', transform: brushColor === color ? 'scale(1.2)' : 'scale(1)' }} />
                 ))}
                 <div className="w-px h-6 bg-gray-200 mx-1" />
                 {[2, 5, 10].map(size => (
-                  <button
-                    key={size}
-                    onClick={() => setBrushSize(size)}
-                    className={`rounded-full bg-gray-800 transition ${brushSize === size ? 'ring-2 ring-blue-500' : ''}`}
-                    style={{ width: size * 2 + 8, height: size * 2 + 8 }}
-                  />
+                  <button key={size} onClick={() => setBrushSize(size)} className={`rounded-full bg-gray-800 transition ${brushSize === size ? 'ring-2 ring-blue-500' : ''}`}
+                    style={{ width: size * 2 + 8, height: size * 2 + 8 }} />
                 ))}
                 <div className="w-px h-6 bg-gray-200 mx-1" />
-                <button onClick={clearCanvas} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200">
-                  Clear
-                </button>
+                <button onClick={clearCanvas} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200">Clear</button>
               </div>
             </div>
           )}
@@ -546,22 +551,16 @@ export default function RoomPage() {
             <p className="text-xs text-gray-500 mt-0.5">Powered by Llama 3.3 via Groq</p>
           </div>
           <div className="flex-1 p-3 overflow-y-auto">
-            {loadingFeedback ? (
-              <div className="text-gray-400 text-sm text-center mt-8 animate-pulse">⏳ Analyzing your code...</div>
-            ) : feedback ? (
-              <div className="text-sm leading-relaxed">{renderFeedback(feedback)}</div>
-            ) : (
-              <div className="text-gray-500 text-sm text-center mt-8">
-                Write some code and click "Get Feedback" to receive AI analysis
-              </div>
-            )}
+            {loadingFeedback
+              ? <div className="text-gray-400 text-sm text-center mt-8 animate-pulse">⏳ Analyzing your code...</div>
+              : feedback
+                ? <div className="text-sm leading-relaxed">{renderFeedback(feedback)}</div>
+                : <div className="text-gray-500 text-sm text-center mt-8">Write some code and click "Get Feedback" to receive AI analysis</div>
+            }
           </div>
           <div className="p-3 border-t border-gray-800">
-            <button
-              onClick={getAIFeedback}
-              disabled={loadingFeedback}
-              className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-sm font-medium transition"
-            >
+            <button onClick={getAIFeedback} disabled={loadingFeedback}
+              className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-sm font-medium transition">
               {loadingFeedback ? '⏳ Analyzing...' : '✨ Get AI Feedback'}
             </button>
           </div>
