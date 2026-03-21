@@ -102,6 +102,12 @@ async def timer_start(sid, data):
         await sio.emit('timer_start', data, room=room_id, skip_sid=sid)
 
 @sio.event
+async def timer_resume(sid, data):
+    room_id = data.get('room_id')
+    if room_id:
+        await sio.emit('timer_resume', data, room=room_id, skip_sid=sid)
+
+@sio.event
 async def timer_stop(sid, data):
     room_id = data.get('room_id')
     if room_id:
