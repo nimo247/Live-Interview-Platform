@@ -14,6 +14,16 @@ interface ChatMessage {
   self: boolean
 }
 
+// Map language → file extension
+const EXTENSIONS: Record<string, string> = {
+  javascript:  'js',
+  typescript:  'ts',
+  python:      'py',
+  java:        'java',
+  cpp:         'cpp',
+  go:          'go',
+}
+
 export default function RoomPage() {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -44,7 +54,7 @@ export default function RoomPage() {
   const [timerInput, setTimerInput] = useState('45')
   const [showTimerInput, setShowTimerInput] = useState(false)
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const timerSecondsRef = useRef(0)  // always up-to-date, no stale closure
+  const timerSecondsRef = useRef(0)
 
   const isRemoteChange = useRef(false)
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -57,24 +67,32 @@ export default function RoomPage() {
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
 
-  // ── Auto-scroll chat ──────────────────────────────────────
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
 
-  // ── Timer core — useCallback so identity is stable ────────
+  // ── Download code ─────────────────────────────────────────
+  const downloadCode = () => {
+    const ext = EXTENSIONS[language] || 'txt'
+    const filename = `solution.${ext}`
+    const blob = new Blob([code], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // ── Timer ─────────────────────────────────────────────────
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60).toString().padStart(2, '0')
     const s = (secs % 60).toString().padStart(2, '0')
     return `${m}:${s}`
   }
 
-  // startTimerAt: clears any existing interval and starts fresh from `seconds`
   const startTimerAt = useCallback((seconds: number) => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current)
-      timerIntervalRef.current = null
-    }
+    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
     timerSecondsRef.current = seconds
     setTimerSeconds(seconds)
     setTimerRunning(true)
@@ -89,33 +107,22 @@ export default function RoomPage() {
         setTimerSeconds(0)
       }
     }, 1000)
-  }, [])  // no deps — only uses refs and setters which are stable
+  }, [])
 
   const pauseTimer = useCallback(() => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current)
-      timerIntervalRef.current = null
-    }
+    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
     setTimerRunning(false)
-    // timerSecondsRef.current keeps its value — used on resume
   }, [])
 
   const resetTimerFn = useCallback(() => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current)
-      timerIntervalRef.current = null
-    }
+    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
     timerSecondsRef.current = 0
     setTimerSeconds(0)
     setTimerRunning(false)
   }, [])
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current) }
-  }, [])
+  useEffect(() => { return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current) } }, [])
 
-  // ── Timer UI handlers — emit socket + run locally ─────────
   const handleStartTimer = () => {
     const mins = parseInt(timerInput)
     if (isNaN(mins) || mins <= 0) return
@@ -124,32 +131,20 @@ export default function RoomPage() {
     setShowTimerInput(false)
     getSocket().emit('timer_start', { room_id: roomId, seconds: secs })
   }
-
   const handleResumeTimer = () => {
-    const secs = timerSecondsRef.current  // exact remaining — ref never stale
+    const secs = timerSecondsRef.current
     startTimerAt(secs)
     getSocket().emit('timer_resume', { room_id: roomId, seconds: secs })
   }
+  const handlePauseTimer = () => { pauseTimer(); getSocket().emit('timer_stop', { room_id: roomId }) }
+  const handleResetTimer = () => { resetTimerFn(); getSocket().emit('timer_reset', { room_id: roomId }) }
 
-  const handlePauseTimer = () => {
-    pauseTimer()
-    getSocket().emit('timer_stop', { room_id: roomId })
-  }
-
-  const handleResetTimer = () => {
-    resetTimerFn()
-    getSocket().emit('timer_reset', { room_id: roomId })
-  }
-
-  const timerColor = timerSeconds <= 60 && timerSeconds > 0
-    ? 'text-red-400'
-    : timerSeconds <= 300 && timerSeconds > 0
-      ? 'text-yellow-400'
-      : 'text-green-400'
+  const timerColor = timerSeconds <= 60 && timerSeconds > 0 ? 'text-red-400'
+    : timerSeconds <= 300 && timerSeconds > 0 ? 'text-yellow-400' : 'text-green-400'
 
   // ── Overlay helpers ───────────────────────────────────────
-  const showLocalOverlay = () => { if (localOverlayRef.current) localOverlayRef.current.style.opacity = '1' }
-  const hideLocalOverlay = () => { if (localOverlayRef.current) localOverlayRef.current.style.opacity = '0' }
+  const showLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '1' }
+  const hideLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '0' }
   const showRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '1' }
   const hideRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '0' }
 
@@ -171,7 +166,6 @@ export default function RoomPage() {
 
   // ── Create WebRTC peer ────────────────────────────────────
   const createPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
-    console.log(`Creating peer — initiator: ${initiator}, hasStream: ${!!stream}`)
     destroyPeer()
     const peerOptions: any = { initiator, trickle: false }
     if (stream) peerOptions.stream = stream
@@ -181,19 +175,17 @@ export default function RoomPage() {
       else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId })
     })
     peer.on('stream', (remoteStream) => {
-      console.log('🎥 Got remote stream!')
       setTimeout(() => { attachStream(remoteVideoRef, remoteStream, false); hideRemoteOverlay() }, 200)
     })
-    peer.on('close', () => { console.log('Peer closed'); clearRemoteVideo(); peerRef.current = null })
+    peer.on('close', () => { clearRemoteVideo(); peerRef.current = null })
     peer.on('error', (err) => { console.error('Peer error:', err); clearRemoteVideo(); peerRef.current = null })
     peer.on('connect', () => console.log('✅ Peer connected!'))
     peerRef.current = peer
   }
 
-  // ── Socket.IO — stable deps via useCallback timer fns ─────
+  // ── Socket.IO ─────────────────────────────────────────────
   useEffect(() => {
     const socket = getSocket()
-
     socket.on('connect', () => { setConnected(true); socket.emit('join_room', { room_id: roomId, username }) })
     socket.on('disconnect', () => setConnected(false))
     socket.on('room_full', (data: any) => { alert(data.message); router.push('/') })
@@ -215,7 +207,7 @@ export default function RoomPage() {
       isRemoteChange.current = true; setCode(data.code); isRemoteChange.current = false
     })
     socket.on('language_updated', (data: any) => setLanguage(data.language))
-    socket.on('webrtc_offer', (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
+    socket.on('webrtc_offer',  (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
     socket.on('webrtc_answer', (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
     socket.on('peer_ready', () => { createPeer(false, localStreamRef.current, socket) })
     socket.on('remote_video_stopped', () => clearRemoteVideo())
@@ -223,20 +215,16 @@ export default function RoomPage() {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       setChatMessages(prev => [...prev, { sender: data.sender, text: data.text, time, self: false }])
     })
-
-    // Timer — all handlers call stable useCallback functions, zero stale closure risk
-    socket.on('timer_start',  (data: any) => { startTimerAt(data.seconds) })
-    socket.on('timer_resume', (data: any) => { startTimerAt(data.seconds) })
-    socket.on('timer_stop',   ()           => { pauseTimer() })
-    socket.on('timer_reset',  ()           => { resetTimerFn() })
-
+    socket.on('timer_start',  (data: any) => startTimerAt(data.seconds))
+    socket.on('timer_resume', (data: any) => startTimerAt(data.seconds))
+    socket.on('timer_stop',   ()           => pauseTimer())
+    socket.on('timer_reset',  ()           => resetTimerFn())
     socket.on('whiteboard_updated', (data: any) => {
       const canvas = canvasRef.current; if (!canvas) return
       const ctx = canvas.getContext('2d'); if (!ctx) return
       ctx.beginPath(); ctx.moveTo(data.x1, data.y1); ctx.lineTo(data.x2, data.y2)
       ctx.strokeStyle = data.color; ctx.lineWidth = data.size; ctx.lineCap = 'round'; ctx.stroke()
     })
-
     return () => { disconnectSocket() }
   }, [roomId, username, startTimerAt, pauseTimer, resetTimerFn])
 
@@ -374,27 +362,25 @@ export default function RoomPage() {
                 ⏱ {formatTime(timerSeconds)}
               </span>
               {timerRunning
-                ? <button onClick={handlePauseTimer} className="text-xs px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded transition">Pause</button>
-                : <button onClick={handleResumeTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">Resume</button>
+                ? <button onClick={handlePauseTimer}  className="text-xs px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded transition">Pause</button>
+                : <button onClick={handleResumeTimer} className="text-xs px-2 py-1 bg-green-700  hover:bg-green-600  rounded transition">Resume</button>
               }
               <button onClick={handleResetTimer} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">Reset</button>
             </>
+          ) : showTimerInput ? (
+            <div className="flex items-center gap-2">
+              <input type="number" value={timerInput} onChange={e => setTimerInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleStartTimer()}
+                className="w-16 bg-gray-800 text-white text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500 text-center"
+                placeholder="min" min="1" max="180" />
+              <span className="text-gray-400 text-xs">min</span>
+              <button onClick={handleStartTimer}          className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
+              <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700  hover:bg-gray-600  rounded transition">✕</button>
+            </div>
           ) : (
-            showTimerInput ? (
-              <div className="flex items-center gap-2">
-                <input type="number" value={timerInput} onChange={e => setTimerInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleStartTimer()}
-                  className="w-16 bg-gray-800 text-white text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500 text-center"
-                  placeholder="min" min="1" max="180" />
-                <span className="text-gray-400 text-xs">min</span>
-                <button onClick={handleStartTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
-                <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">✕</button>
-              </div>
-            ) : (
-              <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">
-                ⏱ Set Timer
-              </button>
-            )
+            <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">
+              ⏱ Set Timer
+            </button>
           )}
         </div>
 
@@ -424,7 +410,7 @@ export default function RoomPage() {
             <div className="flex gap-2">
               {!videoActive
                 ? <button onClick={startVideoCall} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium transition">🎥 Start Video</button>
-                : <button onClick={stopVideo} className="flex-1 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition">⏹ Stop Video</button>
+                : <button onClick={stopVideo}      className="flex-1 py-2 bg-red-600  hover:bg-red-700  rounded-lg text-xs font-medium transition">⏹ Stop Video</button>
               }
               <button onClick={toggleMute} className={`flex-1 py-2 rounded-lg text-xs transition ${muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}>
                 {muted ? '🔇 Unmute' : '🎤 Mute'}
@@ -461,22 +447,43 @@ export default function RoomPage() {
 
         {/* ── Center ── */}
         <div className="flex-1 flex flex-col overflow-hidden">
+
+          {/* Editor toolbar */}
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
-            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>💻 Code Editor</button>
-            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>🎨 Whiteboard</button>
+            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              💻 Code Editor
+            </button>
+            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
+              🎨 Whiteboard
+            </button>
+
             {activeTab === 'code' && (
-              <select value={language} onChange={e => handleLanguageChange(e.target.value)}
-                className="ml-auto bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700">
-                {languages.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
+              <div className="ml-auto flex items-center gap-2">
+                {/* Language selector */}
+                <select value={language} onChange={e => handleLanguageChange(e.target.value)}
+                  className="bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500">
+                  {languages.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+
+                {/* Download button */}
+                <button
+                  onClick={downloadCode}
+                  title={`Download as solution.${EXTENSIONS[language] || 'txt'}`}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-800 hover:bg-green-700 border border-gray-700 hover:border-green-600 text-gray-300 hover:text-white rounded-lg transition"
+                >
+                  ⬇ solution.{EXTENSIONS[language] || 'txt'}
+                </button>
+              </div>
             )}
           </div>
+
           {activeTab === 'code' && (
             <div className="flex-1">
               <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs-dark"
                 options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
             </div>
           )}
+
           {activeTab === 'whiteboard' && (
             <div className="flex-1 bg-white relative">
               <canvas ref={canvasRef} className="w-full h-full" style={{ touchAction: 'none', cursor: 'crosshair' }} />
