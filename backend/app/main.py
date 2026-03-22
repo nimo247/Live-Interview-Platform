@@ -94,32 +94,28 @@ async def chat_message(sid, data):
     if room_id:
         await sio.emit('chat_message', data, room=room_id, skip_sid=sid)
 
-# ── Timer sync ────────────────────────────────────────────────
+# ── Timer ─────────────────────────────────────────────────────
 @sio.event
 async def timer_start(sid, data):
-    room_id = data.get('room_id')
-    if room_id:
-        await sio.emit('timer_start', data, room=room_id, skip_sid=sid)
+    if data.get('room_id'):
+        await sio.emit('timer_start', data, room=data['room_id'], skip_sid=sid)
 
 @sio.event
 async def timer_resume(sid, data):
-    room_id = data.get('room_id')
-    if room_id:
-        await sio.emit('timer_resume', data, room=room_id, skip_sid=sid)
+    if data.get('room_id'):
+        await sio.emit('timer_resume', data, room=data['room_id'], skip_sid=sid)
 
 @sio.event
 async def timer_stop(sid, data):
-    room_id = data.get('room_id')
-    if room_id:
-        await sio.emit('timer_stop', {}, room=room_id, skip_sid=sid)
+    if data.get('room_id'):
+        await sio.emit('timer_stop', {}, room=data['room_id'], skip_sid=sid)
 
 @sio.event
 async def timer_reset(sid, data):
-    room_id = data.get('room_id')
-    if room_id:
-        await sio.emit('timer_reset', {}, room=room_id, skip_sid=sid)
+    if data.get('room_id'):
+        await sio.emit('timer_reset', {}, room=data['room_id'], skip_sid=sid)
 
-# ── WebRTC ────────────────────────────────────────────────────
+# ── WebRTC (camera) ───────────────────────────────────────────
 @sio.event
 async def webrtc_offer(sid, data):
     if data.get('room_id'):
@@ -139,6 +135,29 @@ async def webrtc_ice_candidate(sid, data):
 async def video_ready(sid, data):
     if data.get('room_id'):
         await sio.emit('peer_ready', {}, room=data['room_id'], skip_sid=sid)
+
+# ── WebRTC (screen share) — separate peer connection ──────────
+@sio.event
+async def screen_offer(sid, data):
+    if data.get('room_id'):
+        await sio.emit('screen_offer', data, room=data['room_id'], skip_sid=sid)
+
+@sio.event
+async def screen_answer(sid, data):
+    if data.get('room_id'):
+        await sio.emit('screen_answer', data, room=data['room_id'], skip_sid=sid)
+
+@sio.event
+async def screen_ready(sid, data):
+    """Sharer tells other person: I'm starting screen share, create non-initiator peer"""
+    if data.get('room_id'):
+        await sio.emit('screen_peer_ready', {}, room=data['room_id'], skip_sid=sid)
+
+@sio.event
+async def screen_stopped(sid, data):
+    """Sharer stopped — tell other person to clear the screen slot"""
+    if data.get('room_id'):
+        await sio.emit('screen_stopped', {}, room=data['room_id'], skip_sid=sid)
 
 socket_app = socketio.ASGIApp(sio, app)
 app.include_router(rooms_router)

@@ -14,14 +14,9 @@ interface ChatMessage {
   self: boolean
 }
 
-// Map language → file extension
 const EXTENSIONS: Record<string, string> = {
-  javascript:  'js',
-  typescript:  'ts',
-  python:      'py',
-  java:        'java',
-  cpp:         'cpp',
-  go:          'go',
+  javascript: 'js', typescript: 'ts', python: 'py',
+  java: 'java', cpp: 'cpp', go: 'go',
 }
 
 export default function RoomPage() {
@@ -48,13 +43,21 @@ export default function RoomPage() {
   const [chatInput, setChatInput] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
 
-  // ── Timer state ───────────────────────────────────────────
+  // ── Timer ─────────────────────────────────────────────────
   const [timerSeconds, setTimerSeconds] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
   const [timerInput, setTimerInput] = useState('45')
   const [showTimerInput, setShowTimerInput] = useState(false)
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerSecondsRef = useRef(0)
+
+  // ── Screen share ──────────────────────────────────────────
+  const [screenSharing, setScreenSharing] = useState(false)
+  const [remoteScreenActive, setRemoteScreenActive] = useState(false)
+  const screenVideoRef = useRef<HTMLVideoElement>(null)
+  const screenOverlayRef = useRef<HTMLDivElement>(null)
+  const screenPeerRef = useRef<SimplePeer.Instance | null>(null)
+  const screenStreamRef = useRef<MediaStream | null>(null)
 
   const isRemoteChange = useRef(false)
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -67,20 +70,15 @@ export default function RoomPage() {
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages])
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages])
 
   // ── Download code ─────────────────────────────────────────
   const downloadCode = () => {
     const ext = EXTENSIONS[language] || 'txt'
-    const filename = `solution.${ext}`
     const blob = new Blob([code], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
+    a.href = url; a.download = `solution.${ext}`; a.click()
     URL.revokeObjectURL(url)
   }
 
@@ -90,55 +88,40 @@ export default function RoomPage() {
     const s = (secs % 60).toString().padStart(2, '0')
     return `${m}:${s}`
   }
-
   const startTimerAt = useCallback((seconds: number) => {
     if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
     timerSecondsRef.current = seconds
-    setTimerSeconds(seconds)
-    setTimerRunning(true)
+    setTimerSeconds(seconds); setTimerRunning(true)
     timerIntervalRef.current = setInterval(() => {
       timerSecondsRef.current -= 1
       setTimerSeconds(timerSecondsRef.current)
       if (timerSecondsRef.current <= 0) {
-        clearInterval(timerIntervalRef.current!)
-        timerIntervalRef.current = null
-        setTimerRunning(false)
-        timerSecondsRef.current = 0
-        setTimerSeconds(0)
+        clearInterval(timerIntervalRef.current!); timerIntervalRef.current = null
+        setTimerRunning(false); timerSecondsRef.current = 0; setTimerSeconds(0)
       }
     }, 1000)
   }, [])
-
   const pauseTimer = useCallback(() => {
     if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
     setTimerRunning(false)
   }, [])
-
   const resetTimerFn = useCallback(() => {
     if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
-    timerSecondsRef.current = 0
-    setTimerSeconds(0)
-    setTimerRunning(false)
+    timerSecondsRef.current = 0; setTimerSeconds(0); setTimerRunning(false)
   }, [])
-
   useEffect(() => { return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current) } }, [])
 
   const handleStartTimer = () => {
-    const mins = parseInt(timerInput)
-    if (isNaN(mins) || mins <= 0) return
-    const secs = mins * 60
-    startTimerAt(secs)
-    setShowTimerInput(false)
+    const mins = parseInt(timerInput); if (isNaN(mins) || mins <= 0) return
+    const secs = mins * 60; startTimerAt(secs); setShowTimerInput(false)
     getSocket().emit('timer_start', { room_id: roomId, seconds: secs })
   }
   const handleResumeTimer = () => {
-    const secs = timerSecondsRef.current
-    startTimerAt(secs)
+    const secs = timerSecondsRef.current; startTimerAt(secs)
     getSocket().emit('timer_resume', { room_id: roomId, seconds: secs })
   }
   const handlePauseTimer = () => { pauseTimer(); getSocket().emit('timer_stop', { room_id: roomId }) }
   const handleResetTimer = () => { resetTimerFn(); getSocket().emit('timer_reset', { room_id: roomId }) }
-
   const timerColor = timerSeconds <= 60 && timerSeconds > 0 ? 'text-red-400'
     : timerSeconds <= 300 && timerSeconds > 0 ? 'text-yellow-400' : 'text-green-400'
 
@@ -147,6 +130,8 @@ export default function RoomPage() {
   const hideLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '0' }
   const showRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '1' }
   const hideRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '0' }
+  const showScreenOverlay = () => { if (screenOverlayRef.current) screenOverlayRef.current.style.opacity = '1' }
+  const hideScreenOverlay = () => { if (screenOverlayRef.current) screenOverlayRef.current.style.opacity = '0' }
 
   // ── Video helpers ─────────────────────────────────────────
   const resetVideo = (ref: React.RefObject<HTMLVideoElement | null>) => {
@@ -163,13 +148,17 @@ export default function RoomPage() {
     if (peerRef.current) { peerRef.current.removeAllListeners(); peerRef.current.destroy(); peerRef.current = null }
   }
   const clearRemoteVideo = () => { resetVideo(remoteVideoRef); showRemoteOverlay() }
+  const destroyScreenPeer = () => {
+    if (screenPeerRef.current) { screenPeerRef.current.removeAllListeners(); screenPeerRef.current.destroy(); screenPeerRef.current = null }
+  }
+  const clearScreenSlot = () => { resetVideo(screenVideoRef); showScreenOverlay(); setRemoteScreenActive(false) }
 
-  // ── Create WebRTC peer ────────────────────────────────────
+  // ── Camera peer ───────────────────────────────────────────
   const createPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
     destroyPeer()
-    const peerOptions: any = { initiator, trickle: false }
-    if (stream) peerOptions.stream = stream
-    const peer = new SimplePeer(peerOptions)
+    const opts: any = { initiator, trickle: false }
+    if (stream) opts.stream = stream
+    const peer = new SimplePeer(opts)
     peer.on('signal', (data) => {
       if (data.type === 'offer') socket.emit('webrtc_offer', { sdp: data, room_id: roomId })
       else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId })
@@ -178,9 +167,49 @@ export default function RoomPage() {
       setTimeout(() => { attachStream(remoteVideoRef, remoteStream, false); hideRemoteOverlay() }, 200)
     })
     peer.on('close', () => { clearRemoteVideo(); peerRef.current = null })
-    peer.on('error', (err) => { console.error('Peer error:', err); clearRemoteVideo(); peerRef.current = null })
-    peer.on('connect', () => console.log('✅ Peer connected!'))
+    peer.on('error', (err) => { console.error('Camera peer error:', err); clearRemoteVideo(); peerRef.current = null })
+    peer.on('connect', () => console.log('✅ Camera peer connected!'))
     peerRef.current = peer
+  }
+
+  // ── Screen share peer ─────────────────────────────────────
+  const createScreenPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
+    destroyScreenPeer()
+    const opts: any = { initiator, trickle: false }
+    if (stream) opts.stream = stream
+    const peer = new SimplePeer(opts)
+    peer.on('signal', (data) => {
+      if (data.type === 'offer') socket.emit('screen_offer', { sdp: data, room_id: roomId })
+      else if (data.type === 'answer') socket.emit('screen_answer', { sdp: data, room_id: roomId })
+    })
+    peer.on('stream', (remoteStream) => {
+      console.log('🖥 Got remote screen stream!')
+      setRemoteScreenActive(true)
+      setTimeout(() => { attachStream(screenVideoRef, remoteStream, true); hideScreenOverlay() }, 200)
+    })
+    peer.on('close', () => { clearScreenSlot(); screenPeerRef.current = null })
+    peer.on('error', (err) => { console.error('Screen peer error:', err); clearScreenSlot(); screenPeerRef.current = null })
+    screenPeerRef.current = peer
+  }
+
+  // ── Start / stop screen share ─────────────────────────────
+  const startScreenShare = async () => {
+    if (remoteScreenActive) return  // extra guard — button should already be disabled
+    try {
+      const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false })
+      screenStreamRef.current = stream
+      setScreenSharing(true)
+      stream.getVideoTracks()[0].onended = () => stopScreenShare()
+      const socket = getSocket()
+      createScreenPeer(true, stream, socket)
+      socket.emit('screen_ready', { room_id: roomId })
+    } catch { console.log('Screen share cancelled or denied') }
+  }
+  const stopScreenShare = () => {
+    if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach(t => t.stop()); screenStreamRef.current = null }
+    setScreenSharing(false)
+    destroyScreenPeer()
+    getSocket().emit('screen_stopped', { room_id: roomId })
   }
 
   // ── Socket.IO ─────────────────────────────────────────────
@@ -201,7 +230,7 @@ export default function RoomPage() {
     socket.on('user_left', () => {
       setParticipants(prev => Math.max(1, prev - 1))
       setMessages(prev => [...prev, `❌ A user left`])
-      clearRemoteVideo(); destroyPeer()
+      clearRemoteVideo(); destroyPeer(); clearScreenSlot(); destroyScreenPeer()
     })
     socket.on('code_updated', (data: any) => {
       isRemoteChange.current = true; setCode(data.code); isRemoteChange.current = false
@@ -219,6 +248,10 @@ export default function RoomPage() {
     socket.on('timer_resume', (data: any) => startTimerAt(data.seconds))
     socket.on('timer_stop',   ()           => pauseTimer())
     socket.on('timer_reset',  ()           => resetTimerFn())
+    socket.on('screen_peer_ready', () => { createScreenPeer(false, null, socket) })
+    socket.on('screen_offer',  (data: any) => { if (screenPeerRef.current) screenPeerRef.current.signal(data.sdp) })
+    socket.on('screen_answer', (data: any) => { if (screenPeerRef.current) screenPeerRef.current.signal(data.sdp) })
+    socket.on('screen_stopped', () => { clearScreenSlot(); destroyScreenPeer() })
     socket.on('whiteboard_updated', (data: any) => {
       const canvas = canvasRef.current; if (!canvas) return
       const ctx = canvas.getContext('2d'); if (!ctx) return
@@ -264,7 +297,7 @@ export default function RoomPage() {
     }
   }, [activeTab, brushColor, brushSize, roomId])
 
-  // ── Misc handlers ─────────────────────────────────────────
+  // ── Misc ──────────────────────────────────────────────────
   const handleCodeChange = (value: string | undefined) => {
     const newCode = value || ''; setCode(newCode)
     if (!isRemoteChange.current) getSocket().emit('code_change', { room_id: roomId, code: newCode })
@@ -340,6 +373,9 @@ export default function RoomPage() {
 
   const languages = ['javascript', 'typescript', 'python', 'java', 'cpp', 'go']
 
+  // ── Share button state ────────────────────────────────────
+  const shareButtonLocked = remoteScreenActive && !screenSharing
+
   return (
     <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
 
@@ -363,7 +399,7 @@ export default function RoomPage() {
               </span>
               {timerRunning
                 ? <button onClick={handlePauseTimer}  className="text-xs px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded transition">Pause</button>
-                : <button onClick={handleResumeTimer} className="text-xs px-2 py-1 bg-green-700  hover:bg-green-600  rounded transition">Resume</button>
+                : <button onClick={handleResumeTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">Resume</button>
               }
               <button onClick={handleResetTimer} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">Reset</button>
             </>
@@ -374,8 +410,8 @@ export default function RoomPage() {
                 className="w-16 bg-gray-800 text-white text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500 text-center"
                 placeholder="min" min="1" max="180" />
               <span className="text-gray-400 text-xs">min</span>
-              <button onClick={handleStartTimer}          className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
-              <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700  hover:bg-gray-600  rounded transition">✕</button>
+              <button onClick={handleStartTimer}           className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
+              <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">✕</button>
             </div>
           ) : (
             <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">
@@ -394,32 +430,86 @@ export default function RoomPage() {
 
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── Left: Video + Chat ── */}
+        {/* ── Left: Video + Screen + Chat ── */}
         <div className="w-72 bg-gray-900 border-r border-gray-800 flex flex-col">
           <div className="p-3 flex flex-col gap-3">
-            <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
-              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-              <div ref={localOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
-                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>🎥 Your Video</div>
-            </div>
-            <div className="rounded-lg aspect-video overflow-hidden relative" style={{ background: '#1f2937' }}>
-              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-              <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm"
-                style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>👤 Participant</div>
-            </div>
+
+            {/* Camera feeds side by side */}
             <div className="flex gap-2">
+              <div className="flex-1 rounded-lg overflow-hidden relative" style={{ aspectRatio: '4/3', background: '#1f2937' }}>
+                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                <div ref={localOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs"
+                  style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>🎥 You</div>
+              </div>
+              <div className="flex-1 rounded-lg overflow-hidden relative" style={{ aspectRatio: '4/3', background: '#1f2937' }}>
+                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs"
+                  style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>👤 Them</div>
+              </div>
+            </div>
+
+            {/* Screen share slot */}
+            <div className="rounded-lg overflow-hidden relative w-full" style={{ aspectRatio: '16/9', background: '#111827' }}>
+              <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-contain bg-black" />
+              <div ref={screenOverlayRef} className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 text-xs gap-1"
+                style={{ opacity: 1, background: '#111827', zIndex: 10, transition: 'opacity 0.2s' }}>
+                <span className="text-2xl">🖥</span>
+                <span>No screen share</span>
+              </div>
+              {(screenSharing || remoteScreenActive) && (
+                <div className="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-medium z-20 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
+                  LIVE
+                </div>
+              )}
+            </div>
+
+            {/* Controls */}
+            <div className="flex gap-2">
+              {/* Camera */}
               {!videoActive
-                ? <button onClick={startVideoCall} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium transition">🎥 Start Video</button>
-                : <button onClick={stopVideo}      className="flex-1 py-2 bg-red-600  hover:bg-red-700  rounded-lg text-xs font-medium transition">⏹ Stop Video</button>
+                ? <button onClick={startVideoCall} className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium transition">🎥 Camera</button>
+                : <button onClick={stopVideo}      className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition">⏹ Camera</button>
               }
-              <button onClick={toggleMute} className={`flex-1 py-2 rounded-lg text-xs transition ${muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}>
-                {muted ? '🔇 Unmute' : '🎤 Mute'}
+
+              {/* Screen share — locked if remote is sharing */}
+              {screenSharing ? (
+                <button onClick={stopScreenShare}
+                  className="flex-1 py-1.5 bg-orange-600 hover:bg-orange-700 rounded-lg text-xs font-medium transition">
+                  ⏹ Share
+                </button>
+              ) : (
+                <button
+                  onClick={startScreenShare}
+                  disabled={shareButtonLocked}
+                  title={shareButtonLocked ? 'Someone is already sharing their screen' : 'Share your screen'}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${
+                    shareButtonLocked
+                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                >
+                  🖥 Share
+                </button>
+              )}
+
+              {/* Mute */}
+              <button onClick={toggleMute} className={`flex-1 py-1.5 rounded-lg text-xs transition ${muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}>
+                {muted ? '🔇' : '🎤'}
               </button>
             </div>
+
+            {/* Hint when locked */}
+            {shareButtonLocked && (
+              <p className="text-xs text-center text-gray-500">
+                🔒 Screen sharing in use by the other participant
+              </p>
+            )}
           </div>
 
           <div className="border-t border-gray-800 mx-3" />
 
+          {/* Chat */}
           <div className="flex flex-col flex-1 overflow-hidden p-3 gap-2">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💬 Chat</div>
             <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
@@ -447,43 +537,28 @@ export default function RoomPage() {
 
         {/* ── Center ── */}
         <div className="flex-1 flex flex-col overflow-hidden">
-
-          {/* Editor toolbar */}
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
-            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-              💻 Code Editor
-            </button>
-            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>
-              🎨 Whiteboard
-            </button>
-
+            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>💻 Code Editor</button>
+            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>🎨 Whiteboard</button>
             {activeTab === 'code' && (
               <div className="ml-auto flex items-center gap-2">
-                {/* Language selector */}
                 <select value={language} onChange={e => handleLanguageChange(e.target.value)}
-                  className="bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-blue-500">
+                  className="bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none">
                   {languages.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
-
-                {/* Download button */}
-                <button
-                  onClick={downloadCode}
-                  title={`Download as solution.${EXTENSIONS[language] || 'txt'}`}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-800 hover:bg-green-700 border border-gray-700 hover:border-green-600 text-gray-300 hover:text-white rounded-lg transition"
-                >
+                <button onClick={downloadCode}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-800 hover:bg-green-700 border border-gray-700 hover:border-green-600 text-gray-300 hover:text-white rounded-lg transition">
                   ⬇ solution.{EXTENSIONS[language] || 'txt'}
                 </button>
               </div>
             )}
           </div>
-
           {activeTab === 'code' && (
             <div className="flex-1">
               <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs-dark"
                 options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
             </div>
           )}
-
           {activeTab === 'whiteboard' && (
             <div className="flex-1 bg-white relative">
               <canvas ref={canvasRef} className="w-full h-full" style={{ touchAction: 'none', cursor: 'crosshair' }} />
