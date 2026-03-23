@@ -115,7 +115,7 @@ async def timer_reset(sid, data):
     if data.get('room_id'):
         await sio.emit('timer_reset', {}, room=data['room_id'], skip_sid=sid)
 
-# ── WebRTC (camera) ───────────────────────────────────────────
+# ── WebRTC camera + audio ─────────────────────────────────────
 @sio.event
 async def webrtc_offer(sid, data):
     if data.get('room_id'):
@@ -133,10 +133,17 @@ async def webrtc_ice_candidate(sid, data):
 
 @sio.event
 async def video_ready(sid, data):
+    """Camera peer — other person creates non-initiator"""
     if data.get('room_id'):
         await sio.emit('peer_ready', {}, room=data['room_id'], skip_sid=sid)
 
-# ── WebRTC (screen share) — separate peer connection ──────────
+@sio.event
+async def audio_ready(sid, data):
+    """Audio-only peer — other person creates non-initiator audio peer"""
+    if data.get('room_id'):
+        await sio.emit('audio_peer_ready', {}, room=data['room_id'], skip_sid=sid)
+
+# ── WebRTC screen share ───────────────────────────────────────
 @sio.event
 async def screen_offer(sid, data):
     if data.get('room_id'):
@@ -149,13 +156,11 @@ async def screen_answer(sid, data):
 
 @sio.event
 async def screen_ready(sid, data):
-    """Sharer tells other person: I'm starting screen share, create non-initiator peer"""
     if data.get('room_id'):
         await sio.emit('screen_peer_ready', {}, room=data['room_id'], skip_sid=sid)
 
 @sio.event
 async def screen_stopped(sid, data):
-    """Sharer stopped — tell other person to clear the screen slot"""
     if data.get('room_id'):
         await sio.emit('screen_stopped', {}, room=data['room_id'], skip_sid=sid)
 

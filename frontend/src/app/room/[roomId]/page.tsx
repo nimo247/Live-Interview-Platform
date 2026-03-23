@@ -14,6 +14,16 @@ interface ChatMessage {
   self: boolean
 }
 
+interface RunResult {
+  stdout: string
+  stderr: string
+  compile_output: string
+  status: string
+  time: string | null
+  memory: number | null
+  error: string
+}
+
 const EXTENSIONS: Record<string, string> = {
   javascript: 'js', typescript: 'ts', python: 'py',
   java: 'java', cpp: 'cpp', go: 'go',
@@ -34,6 +44,7 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<string[]>([])
   const [videoActive, setVideoActive] = useState(false)
   const [muted, setMuted] = useState(false)
+  const [micReady, setMicReady] = useState(false)
   const [brushColor, setBrushColor] = useState('#000000')
   const [brushSize, setBrushSize] = useState(3)
   const [feedback, setFeedback] = useState('')
@@ -42,6 +53,13 @@ export default function RoomPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
+
+  // ── Code execution ────────────────────────────────────────
+  const [runResult, setRunResult] = useState<RunResult | null>(null)
+  const [running, setRunning] = useState(false)
+  const [outputOpen, setOutputOpen] = useState(false)
+  const [stdinInput, setStdinInput] = useState('')
+  const [showStdin, setShowStdin] = useState(false)
 
   // ── Timer ─────────────────────────────────────────────────
   const [timerSeconds, setTimerSeconds] = useState(0)
@@ -62,15 +80,42 @@ export default function RoomPage() {
   const isRemoteChange = useRef(false)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
+  const remoteAudioRef = useRef<HTMLAudioElement>(null)
   const localOverlayRef = useRef<HTMLDivElement>(null)
   const remoteOverlayRef = useRef<HTMLDivElement>(null)
+  const audioPeerRef = useRef<SimplePeer.Instance | null>(null)
   const peerRef = useRef<SimplePeer.Instance | null>(null)
+  const audioStreamRef = useRef<MediaStream | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages])
+
+  // ── Run code ──────────────────────────────────────────────
+  const runCode = async () => {
+    setRunning(true)
+    setOutputOpen(true)
+    setRunResult(null)
+    try {
+      const res = await fetch('http://localhost:8000/rooms/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, language, stdin: stdinInput })
+      })
+      const data = await res.json()
+      setRunResult(data)
+    } catch (e) {
+      setRunResult({
+        stdout: '', stderr: '', compile_output: '',
+        status: 'Error', time: null, memory: null,
+        error: 'Could not reach backend. Is it running?'
+      })
+    } finally {
+      setRunning(false)
+    }
+  }
 
   // ── Download code ─────────────────────────────────────────
   const downloadCode = () => {
@@ -120,12 +165,12 @@ export default function RoomPage() {
     const secs = timerSecondsRef.current; startTimerAt(secs)
     getSocket().emit('timer_resume', { room_id: roomId, seconds: secs })
   }
-  const handlePauseTimer = () => { pauseTimer(); getSocket().emit('timer_stop', { room_id: roomId }) }
-  const handleResetTimer = () => { resetTimerFn(); getSocket().emit('timer_reset', { room_id: roomId }) }
+  const handlePauseTimer  = () => { pauseTimer();   getSocket().emit('timer_stop',  { room_id: roomId }) }
+  const handleResetTimer  = () => { resetTimerFn(); getSocket().emit('timer_reset', { room_id: roomId }) }
   const timerColor = timerSeconds <= 60 && timerSeconds > 0 ? 'text-red-400'
     : timerSeconds <= 300 && timerSeconds > 0 ? 'text-yellow-400' : 'text-green-400'
 
-  // ── Overlay helpers ───────────────────────────────────────
+  // ── Overlays ──────────────────────────────────────────────
   const showLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '1' }
   const hideLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '0' }
   const showRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '1' }
@@ -142,80 +187,102 @@ export default function RoomPage() {
   const attachStream = (ref: React.RefObject<HTMLVideoElement | null>, stream: MediaStream, muted = false) => {
     if (!ref.current) return
     ref.current.srcObject = stream; ref.current.muted = muted
-    ref.current.play().catch(err => console.warn('Autoplay blocked:', err))
+    ref.current.play().catch(e => console.warn('Autoplay blocked:', e))
+  }
+  const destroyAudioPeer = () => {
+    if (audioPeerRef.current) { audioPeerRef.current.removeAllListeners(); audioPeerRef.current.destroy(); audioPeerRef.current = null }
   }
   const destroyPeer = () => {
     if (peerRef.current) { peerRef.current.removeAllListeners(); peerRef.current.destroy(); peerRef.current = null }
   }
-  const clearRemoteVideo = () => { resetVideo(remoteVideoRef); showRemoteOverlay() }
   const destroyScreenPeer = () => {
     if (screenPeerRef.current) { screenPeerRef.current.removeAllListeners(); screenPeerRef.current.destroy(); screenPeerRef.current = null }
   }
-  const clearScreenSlot = () => { resetVideo(screenVideoRef); showScreenOverlay(); setRemoteScreenActive(false) }
+  const clearRemoteVideo = () => { resetVideo(remoteVideoRef); showRemoteOverlay() }
+  const clearScreenSlot  = () => { resetVideo(screenVideoRef); showScreenOverlay(); setRemoteScreenActive(false) }
 
-  // ── Camera peer ───────────────────────────────────────────
-  const createPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
-    destroyPeer()
-    const opts: any = { initiator, trickle: false }
-    if (stream) opts.stream = stream
-    const peer = new SimplePeer(opts)
+  // ── Audio peer ────────────────────────────────────────────
+  const createAudioPeer = (initiator: boolean, socket: any) => {
+    destroyAudioPeer()
+    const audioStream = audioStreamRef.current; if (!audioStream) return
+    const peer = new SimplePeer({ initiator, trickle: false, stream: audioStream })
     peer.on('signal', (data) => {
-      if (data.type === 'offer') socket.emit('webrtc_offer', { sdp: data, room_id: roomId })
-      else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId })
+      if (data.type === 'offer') socket.emit('webrtc_offer', { sdp: data, room_id: roomId, kind: 'audio' })
+      else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId, kind: 'audio' })
+    })
+    peer.on('stream', (remoteAudioStream) => {
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteAudioStream
+        remoteAudioRef.current.play().catch(e => console.warn('Audio autoplay:', e))
+      }
+    })
+    peer.on('close', () => { audioPeerRef.current = null })
+    peer.on('error', (e) => { console.error('Audio peer:', e); audioPeerRef.current = null })
+    peer.on('connect', () => console.log('✅ Audio peer connected!'))
+    audioPeerRef.current = peer
+  }
+
+  // ── Video peer ────────────────────────────────────────────
+  const createPeer = (initiator: boolean, videoStream: MediaStream | null, socket: any) => {
+    destroyPeer(); if (!videoStream) return
+    const peer = new SimplePeer({ initiator, trickle: false, stream: videoStream })
+    peer.on('signal', (data) => {
+      if (data.type === 'offer') socket.emit('webrtc_offer', { sdp: data, room_id: roomId, kind: 'video' })
+      else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId, kind: 'video' })
     })
     peer.on('stream', (remoteStream) => {
-      setTimeout(() => { attachStream(remoteVideoRef, remoteStream, false); hideRemoteOverlay() }, 200)
+      setTimeout(() => { attachStream(remoteVideoRef, remoteStream, true); hideRemoteOverlay() }, 200)
     })
     peer.on('close', () => { clearRemoteVideo(); peerRef.current = null })
-    peer.on('error', (err) => { console.error('Camera peer error:', err); clearRemoteVideo(); peerRef.current = null })
-    peer.on('connect', () => console.log('✅ Camera peer connected!'))
+    peer.on('error', (e) => { console.error('Video peer:', e); clearRemoteVideo(); peerRef.current = null })
     peerRef.current = peer
   }
 
-  // ── Screen share peer ─────────────────────────────────────
+  // ── Screen peer ───────────────────────────────────────────
   const createScreenPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
     destroyScreenPeer()
-    const opts: any = { initiator, trickle: false }
-    if (stream) opts.stream = stream
+    const opts: any = { initiator, trickle: false }; if (stream) opts.stream = stream
     const peer = new SimplePeer(opts)
     peer.on('signal', (data) => {
       if (data.type === 'offer') socket.emit('screen_offer', { sdp: data, room_id: roomId })
       else if (data.type === 'answer') socket.emit('screen_answer', { sdp: data, room_id: roomId })
     })
-    peer.on('stream', (remoteStream) => {
-      console.log('🖥 Got remote screen stream!')
+    peer.on('stream', (s) => {
       setRemoteScreenActive(true)
-      setTimeout(() => { attachStream(screenVideoRef, remoteStream, true); hideScreenOverlay() }, 200)
+      setTimeout(() => { attachStream(screenVideoRef, s, true); hideScreenOverlay() }, 200)
     })
     peer.on('close', () => { clearScreenSlot(); screenPeerRef.current = null })
-    peer.on('error', (err) => { console.error('Screen peer error:', err); clearScreenSlot(); screenPeerRef.current = null })
+    peer.on('error', (e) => { console.error('Screen peer:', e); clearScreenSlot(); screenPeerRef.current = null })
     screenPeerRef.current = peer
   }
 
-  // ── Start / stop screen share ─────────────────────────────
-  const startScreenShare = async () => {
-    if (remoteScreenActive) return  // extra guard — button should already be disabled
-    try {
-      const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false })
-      screenStreamRef.current = stream
-      setScreenSharing(true)
-      stream.getVideoTracks()[0].onended = () => stopScreenShare()
-      const socket = getSocket()
-      createScreenPeer(true, stream, socket)
-      socket.emit('screen_ready', { room_id: roomId })
-    } catch { console.log('Screen share cancelled or denied') }
-  }
-  const stopScreenShare = () => {
-    if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach(t => t.stop()); screenStreamRef.current = null }
-    setScreenSharing(false)
-    destroyScreenPeer()
-    getSocket().emit('screen_stopped', { room_id: roomId })
-  }
+  // ── Acquire mic on mount ──────────────────────────────────
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then(stream => {
+        audioStreamRef.current = stream; setMicReady(true)
+        const socket = getSocket()
+        if (socket.connected) {
+          socket.emit('audio_ready', { room_id: roomId })
+          createAudioPeer(true, socket)
+        }
+      })
+      .catch(e => console.warn('Mic not available:', e))
+    return () => {
+      if (audioStreamRef.current) { audioStreamRef.current.getTracks().forEach(t => t.stop()); audioStreamRef.current = null }
+      destroyAudioPeer()
+    }
+  }, [roomId])
 
   // ── Socket.IO ─────────────────────────────────────────────
   useEffect(() => {
     const socket = getSocket()
-    socket.on('connect', () => { setConnected(true); socket.emit('join_room', { room_id: roomId, username }) })
+    socket.on('connect', () => {
+      setConnected(true); socket.emit('join_room', { room_id: roomId, username })
+      if (audioStreamRef.current) {
+        setTimeout(() => { socket.emit('audio_ready', { room_id: roomId }); createAudioPeer(true, socket) }, 500)
+      }
+    })
     socket.on('disconnect', () => setConnected(false))
     socket.on('room_full', (data: any) => { alert(data.message); router.push('/') })
     socket.on('room_joined', (data: any) => {
@@ -226,18 +293,29 @@ export default function RoomPage() {
     socket.on('user_joined', (data: any) => {
       setParticipants(data.participants)
       setMessages(prev => [...prev, `✅ ${data.username} joined`])
+      if (audioStreamRef.current) {
+        setTimeout(() => { socket.emit('audio_ready', { room_id: roomId }); createAudioPeer(true, socket) }, 500)
+      }
     })
     socket.on('user_left', () => {
       setParticipants(prev => Math.max(1, prev - 1))
       setMessages(prev => [...prev, `❌ A user left`])
-      clearRemoteVideo(); destroyPeer(); clearScreenSlot(); destroyScreenPeer()
+      clearRemoteVideo(); destroyPeer(); clearScreenSlot(); destroyScreenPeer(); destroyAudioPeer()
+      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
     })
     socket.on('code_updated', (data: any) => {
       isRemoteChange.current = true; setCode(data.code); isRemoteChange.current = false
     })
     socket.on('language_updated', (data: any) => setLanguage(data.language))
-    socket.on('webrtc_offer',  (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
-    socket.on('webrtc_answer', (data: any) => { if (peerRef.current) peerRef.current.signal(data.sdp) })
+    socket.on('webrtc_offer', (data: any) => {
+      if (data.kind === 'audio' && audioPeerRef.current) audioPeerRef.current.signal(data.sdp)
+      else if (data.kind === 'video' && peerRef.current) peerRef.current.signal(data.sdp)
+    })
+    socket.on('webrtc_answer', (data: any) => {
+      if (data.kind === 'audio' && audioPeerRef.current) audioPeerRef.current.signal(data.sdp)
+      else if (data.kind === 'video' && peerRef.current) peerRef.current.signal(data.sdp)
+    })
+    socket.on('audio_peer_ready', () => { createAudioPeer(false, socket) })
     socket.on('peer_ready', () => { createPeer(false, localStreamRef.current, socket) })
     socket.on('remote_video_stopped', () => clearRemoteVideo())
     socket.on('chat_message', (data: any) => {
@@ -317,12 +395,12 @@ export default function RoomPage() {
   }
   const startVideoCall = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      localStreamRef.current = stream; setVideoActive(true)
-      attachStream(localVideoRef, stream, true); hideLocalOverlay()
-      const socket = getSocket(); createPeer(true, stream, socket)
+      const videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      localStreamRef.current = videoStream; setVideoActive(true)
+      attachStream(localVideoRef, videoStream, true); hideLocalOverlay()
+      const socket = getSocket(); createPeer(true, videoStream, socket)
       socket.emit('video_ready', { room_id: roomId })
-    } catch { alert('Could not access camera/microphone. Please allow permissions!') }
+    } catch { alert('Could not access camera. Please allow permissions!') }
   }
   const stopVideo = () => {
     if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop())
@@ -331,10 +409,25 @@ export default function RoomPage() {
     getSocket().emit('video_stopped', { room_id: roomId })
   }
   const toggleMute = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled })
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled })
       setMuted(prev => !prev)
     }
+  }
+  const startScreenShare = async () => {
+    if (remoteScreenActive) return
+    try {
+      const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false })
+      screenStreamRef.current = stream; setScreenSharing(true)
+      stream.getVideoTracks()[0].onended = () => stopScreenShare()
+      const socket = getSocket(); createScreenPeer(true, stream, socket)
+      socket.emit('screen_ready', { room_id: roomId })
+    } catch { console.log('Screen share cancelled') }
+  }
+  const stopScreenShare = () => {
+    if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach(t => t.stop()); screenStreamRef.current = null }
+    setScreenSharing(false); destroyScreenPeer()
+    getSocket().emit('screen_stopped', { room_id: roomId })
   }
   const clearCanvas = () => {
     const canvas = canvasRef.current; if (!canvas) return
@@ -371,13 +464,23 @@ export default function RoomPage() {
     )
   })
 
-  const languages = ['javascript', 'typescript', 'python', 'java', 'cpp', 'go']
+  // ── Output panel helpers ──────────────────────────────────
+  const getStatusColor = (status: string) => {
+    if (status === 'Accepted') return 'text-green-400'
+    if (status.includes('Error') || status.includes('Runtime') || status.includes('Compile')) return 'text-red-400'
+    if (status === 'Time Limit Exceeded') return 'text-yellow-400'
+    return 'text-gray-400'
+  }
+  const outputText = runResult
+    ? (runResult.error || runResult.compile_output || runResult.stderr || runResult.stdout || '(no output)')
+    : ''
 
-  // ── Share button state ────────────────────────────────────
+  const languages = ['javascript', 'typescript', 'python', 'java', 'cpp', 'go']
   const shareButtonLocked = remoteScreenActive && !screenSharing
 
   return (
     <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
 
       {/* ── Top Bar ── */}
       <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800">
@@ -414,9 +517,7 @@ export default function RoomPage() {
               <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">✕</button>
             </div>
           ) : (
-            <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">
-              ⏱ Set Timer
-            </button>
+            <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">⏱ Set Timer</button>
           )}
         </div>
 
@@ -430,11 +531,9 @@ export default function RoomPage() {
 
       <div className="flex flex-1 overflow-hidden">
 
-        {/* ── Left: Video + Screen + Chat ── */}
+        {/* ── Left ── */}
         <div className="w-72 bg-gray-900 border-r border-gray-800 flex flex-col">
           <div className="p-3 flex flex-col gap-3">
-
-            {/* Camera feeds side by side */}
             <div className="flex gap-2">
               <div className="flex-1 rounded-lg overflow-hidden relative" style={{ aspectRatio: '4/3', background: '#1f2937' }}>
                 <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
@@ -442,74 +541,45 @@ export default function RoomPage() {
                   style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>🎥 You</div>
               </div>
               <div className="flex-1 rounded-lg overflow-hidden relative" style={{ aspectRatio: '4/3', background: '#1f2937' }}>
-                <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+                <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
                 <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs"
                   style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>👤 Them</div>
               </div>
             </div>
-
-            {/* Screen share slot */}
             <div className="rounded-lg overflow-hidden relative w-full" style={{ aspectRatio: '16/9', background: '#111827' }}>
               <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-contain bg-black" />
               <div ref={screenOverlayRef} className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 text-xs gap-1"
                 style={{ opacity: 1, background: '#111827', zIndex: 10, transition: 'opacity 0.2s' }}>
-                <span className="text-2xl">🖥</span>
-                <span>No screen share</span>
+                <span className="text-2xl">🖥</span><span>No screen share</span>
               </div>
               {(screenSharing || remoteScreenActive) && (
                 <div className="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-medium z-20 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />
-                  LIVE
+                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />LIVE
                 </div>
               )}
             </div>
-
-            {/* Controls */}
             <div className="flex gap-2">
-              {/* Camera */}
               {!videoActive
                 ? <button onClick={startVideoCall} className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium transition">🎥 Camera</button>
                 : <button onClick={stopVideo}      className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition">⏹ Camera</button>
               }
-
-              {/* Screen share — locked if remote is sharing */}
-              {screenSharing ? (
-                <button onClick={stopScreenShare}
-                  className="flex-1 py-1.5 bg-orange-600 hover:bg-orange-700 rounded-lg text-xs font-medium transition">
-                  ⏹ Share
-                </button>
-              ) : (
-                <button
-                  onClick={startScreenShare}
-                  disabled={shareButtonLocked}
-                  title={shareButtonLocked ? 'Someone is already sharing their screen' : 'Share your screen'}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${
-                    shareButtonLocked
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50'
-                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                  }`}
-                >
-                  🖥 Share
-                </button>
-              )}
-
-              {/* Mute */}
-              <button onClick={toggleMute} className={`flex-1 py-1.5 rounded-lg text-xs transition ${muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}>
+              {screenSharing
+                ? <button onClick={stopScreenShare}  className="flex-1 py-1.5 bg-orange-600 hover:bg-orange-700 rounded-lg text-xs font-medium transition">⏹ Share</button>
+                : <button onClick={startScreenShare} disabled={shareButtonLocked}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${shareButtonLocked ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
+                    🖥 Share
+                  </button>
+              }
+              <button onClick={toggleMute} disabled={!micReady}
+                className={`flex-1 py-1.5 rounded-lg text-xs transition ${!micReady ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50' : muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}>
                 {muted ? '🔇' : '🎤'}
               </button>
             </div>
-
-            {/* Hint when locked */}
-            {shareButtonLocked && (
-              <p className="text-xs text-center text-gray-500">
-                🔒 Screen sharing in use by the other participant
-              </p>
-            )}
+            {shareButtonLocked && <p className="text-xs text-center text-gray-500">🔒 Screen sharing in use by the other participant</p>}
           </div>
 
           <div className="border-t border-gray-800 mx-3" />
 
-          {/* Chat */}
           <div className="flex flex-col flex-1 overflow-hidden p-3 gap-2">
             <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💬 Chat</div>
             <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
@@ -535,8 +605,10 @@ export default function RoomPage() {
           </div>
         </div>
 
-        {/* ── Center ── */}
+        {/* ── Center: Editor + Output ── */}
         <div className="flex-1 flex flex-col overflow-hidden">
+
+          {/* Toolbar */}
           <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
             <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>💻 Code Editor</button>
             <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>🎨 Whiteboard</button>
@@ -546,19 +618,85 @@ export default function RoomPage() {
                   className="bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none">
                   {languages.map(l => <option key={l} value={l}>{l}</option>)}
                 </select>
+                {/* stdin toggle */}
+                <button onClick={() => setShowStdin(p => !p)}
+                  className={`text-xs px-2 py-1.5 rounded-lg border transition ${showStdin ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}
+                  title="Toggle stdin input">
+                  stdin
+                </button>
+                {/* Run button */}
+                <button onClick={runCode} disabled={running}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white rounded-lg font-medium transition">
+                  {running ? '⏳ Running...' : '▶ Run'}
+                </button>
                 <button onClick={downloadCode}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-800 hover:bg-green-700 border border-gray-700 hover:border-green-600 text-gray-300 hover:text-white rounded-lg transition">
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white rounded-lg transition">
                   ⬇ solution.{EXTENSIONS[language] || 'txt'}
                 </button>
               </div>
             )}
           </div>
-          {activeTab === 'code' && (
-            <div className="flex-1">
-              <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs-dark"
-                options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
+
+          {/* Stdin row */}
+          {activeTab === 'code' && showStdin && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
+              <span className="text-xs text-gray-400 shrink-0">stdin:</span>
+              <input type="text" value={stdinInput} onChange={e => setStdinInput(e.target.value)}
+                placeholder="Enter input for your program (optional)"
+                className="flex-1 bg-gray-800 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-green-500 placeholder-gray-600 font-mono" />
             </div>
           )}
+
+          {/* Editor */}
+          {activeTab === 'code' && (
+            <div className="flex-1 flex flex-col" style={{ minHeight: 0 }}>
+              <div className="flex-1">
+                <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs-dark"
+                  options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
+              </div>
+
+              {/* ── Output Panel (slides up) ── */}
+              {outputOpen && (
+                <div className="border-t border-gray-700 bg-gray-950 flex flex-col" style={{ height: '220px' }}>
+                  {/* Output header */}
+                  <div className="flex items-center justify-between px-4 py-1.5 bg-gray-900 border-b border-gray-800">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-semibold text-gray-300">Output</span>
+                      {runResult && (
+                        <>
+                          <span className={`text-xs font-medium ${getStatusColor(runResult.status)}`}>
+                            {runResult.status}
+                          </span>
+                          {runResult.time && (
+                            <span className="text-xs text-gray-500">⏱ {runResult.time}s</span>
+                          )}
+                          {runResult.memory && (
+                            <span className="text-xs text-gray-500">💾 {(runResult.memory / 1024).toFixed(1)} MB</span>
+                          )}
+                        </>
+                      )}
+                      {running && <span className="text-xs text-yellow-400 animate-pulse">Running...</span>}
+                    </div>
+                    <button onClick={() => setOutputOpen(false)} className="text-gray-500 hover:text-white text-xs transition">✕ Close</button>
+                  </div>
+                  {/* Output content */}
+                  <div className="flex-1 overflow-y-auto p-3">
+                    {running ? (
+                      <div className="text-yellow-400 text-xs animate-pulse">⏳ Executing your code...</div>
+                    ) : runResult ? (
+                      <pre className={`text-xs font-mono whitespace-pre-wrap break-words leading-relaxed ${
+                        runResult.error || runResult.stderr || runResult.compile_output
+                          ? 'text-red-400' : 'text-green-300'
+                      }`}>
+                        {outputText}
+                      </pre>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === 'whiteboard' && (
             <div className="flex-1 bg-white relative">
               <canvas ref={canvasRef} className="w-full h-full" style={{ touchAction: 'none', cursor: 'crosshair' }} />
