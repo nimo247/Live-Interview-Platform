@@ -443,7 +443,7 @@ export default function RoomPage() {
   const getAIFeedback = async () => {
     setFeedback(''); setLoadingFeedback(true)
     try {
-      const res = await fetch('http://localhost:8000/rooms/ai-feedback', {
+      const res = await fetch('http://NEW_IP:8000/rooms/ai-feedback', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language })
       })
