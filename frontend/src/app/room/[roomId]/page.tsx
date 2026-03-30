@@ -54,14 +54,12 @@ export default function RoomPage() {
   const [chatInput, setChatInput] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
 
-  // ── Code execution ────────────────────────────────────────
   const [runResult, setRunResult] = useState<RunResult | null>(null)
   const [running, setRunning] = useState(false)
   const [outputOpen, setOutputOpen] = useState(false)
   const [stdinInput, setStdinInput] = useState('')
   const [showStdin, setShowStdin] = useState(false)
 
-  // ── Timer ─────────────────────────────────────────────────
   const [timerSeconds, setTimerSeconds] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
   const [timerInput, setTimerInput] = useState('45')
@@ -69,7 +67,6 @@ export default function RoomPage() {
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerSecondsRef = useRef(0)
 
-  // ── Screen share ──────────────────────────────────────────
   const [screenSharing, setScreenSharing] = useState(false)
   const [remoteScreenActive, setRemoteScreenActive] = useState(false)
   const screenVideoRef = useRef<HTMLVideoElement>(null)
@@ -93,7 +90,6 @@ export default function RoomPage() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages])
 
-  // ── Run code ──────────────────────────────────────────────
   const runCode = async () => {
     setRunning(true)
     setOutputOpen(true)
@@ -117,7 +113,6 @@ export default function RoomPage() {
     }
   }
 
-  // ── Download code ─────────────────────────────────────────
   const downloadCode = () => {
     const ext = EXTENSIONS[language] || 'txt'
     const blob = new Blob([code], { type: 'text/plain' })
@@ -127,7 +122,6 @@ export default function RoomPage() {
     URL.revokeObjectURL(url)
   }
 
-  // ── Timer ─────────────────────────────────────────────────
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60).toString().padStart(2, '0')
     const s = (secs % 60).toString().padStart(2, '0')
@@ -167,10 +161,7 @@ export default function RoomPage() {
   }
   const handlePauseTimer  = () => { pauseTimer();   getSocket().emit('timer_stop',  { room_id: roomId }) }
   const handleResetTimer  = () => { resetTimerFn(); getSocket().emit('timer_reset', { room_id: roomId }) }
-  const timerColor = timerSeconds <= 60 && timerSeconds > 0 ? 'text-red-400'
-    : timerSeconds <= 300 && timerSeconds > 0 ? 'text-yellow-400' : 'text-green-400'
 
-  // ── Overlays ──────────────────────────────────────────────
   const showLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '1' }
   const hideLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '0' }
   const showRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '1' }
@@ -178,7 +169,6 @@ export default function RoomPage() {
   const showScreenOverlay = () => { if (screenOverlayRef.current) screenOverlayRef.current.style.opacity = '1' }
   const hideScreenOverlay = () => { if (screenOverlayRef.current) screenOverlayRef.current.style.opacity = '0' }
 
-  // ── Video helpers ─────────────────────────────────────────
   const resetVideo = (ref: React.RefObject<HTMLVideoElement | null>) => {
     if (!ref.current) return
     ref.current.pause(); ref.current.srcObject = null
@@ -201,7 +191,6 @@ export default function RoomPage() {
   const clearRemoteVideo = () => { resetVideo(remoteVideoRef); showRemoteOverlay() }
   const clearScreenSlot  = () => { resetVideo(screenVideoRef); showScreenOverlay(); setRemoteScreenActive(false) }
 
-  // ── Audio peer ────────────────────────────────────────────
   const createAudioPeer = (initiator: boolean, socket: any) => {
     destroyAudioPeer()
     const audioStream = audioStreamRef.current; if (!audioStream) return
@@ -222,7 +211,6 @@ export default function RoomPage() {
     audioPeerRef.current = peer
   }
 
-  // ── Video peer ────────────────────────────────────────────
   const createPeer = (initiator: boolean, videoStream: MediaStream | null, socket: any) => {
     destroyPeer(); if (!videoStream) return
     const peer = new SimplePeer({ initiator, trickle: false, stream: videoStream })
@@ -238,7 +226,6 @@ export default function RoomPage() {
     peerRef.current = peer
   }
 
-  // ── Screen peer ───────────────────────────────────────────
   const createScreenPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
     destroyScreenPeer()
     const opts: any = { initiator, trickle: false }; if (stream) opts.stream = stream
@@ -256,7 +243,6 @@ export default function RoomPage() {
     screenPeerRef.current = peer
   }
 
-  // ── Acquire mic on mount ──────────────────────────────────
   useEffect(() => {
     navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       .then(stream => {
@@ -274,7 +260,6 @@ export default function RoomPage() {
     }
   }, [roomId])
 
-  // ── Socket.IO ─────────────────────────────────────────────
   useEffect(() => {
     const socket = getSocket()
     socket.on('connect', () => {
@@ -339,7 +324,6 @@ export default function RoomPage() {
     return () => { disconnectSocket() }
   }, [roomId, username, startTimerAt, pauseTimer, resetTimerFn])
 
-  // ── Whiteboard ────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'whiteboard') return
     const canvas = canvasRef.current; if (!canvas) return
@@ -375,7 +359,6 @@ export default function RoomPage() {
     }
   }, [activeTab, brushColor, brushSize, roomId])
 
-  // ── Misc ──────────────────────────────────────────────────
   const handleCodeChange = (value: string | undefined) => {
     const newCode = value || ''; setCode(newCode)
     if (!isRemoteChange.current) getSocket().emit('code_change', { room_id: roomId, code: newCode })
@@ -443,7 +426,7 @@ export default function RoomPage() {
   const getAIFeedback = async () => {
     setFeedback(''); setLoadingFeedback(true)
     try {
-      const res = await fetch('http://NEW_IP:8000/rooms/ai-feedback', {
+      const res = await fetch('http://localhost:8000/rooms/ai-feedback', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language })
       })
@@ -455,21 +438,20 @@ export default function RoomPage() {
     if (!line.trim()) return <div key={i} className="h-2" />
     const parts = line.split(/\*\*(.*?)\*\*/g)
     return (
-      <p key={i} className={line.startsWith('**') ? 'mt-3 mb-1' : 'mb-1 text-gray-400'}>
+      <p key={i} className={line.startsWith('**') ? 'mt-3 mb-1' : ''}>
         {parts.map((part, j) => j % 2 === 1
-          ? <span key={j} className="font-bold text-white">{part}</span>
+          ? <span key={j} className="font-bold text-brand-indigo">{part}</span>
           : <span key={j}>{part}</span>
         )}
       </p>
     )
   })
 
-  // ── Output panel helpers ──────────────────────────────────
   const getStatusColor = (status: string) => {
-    if (status === 'Accepted') return 'text-green-400'
-    if (status.includes('Error') || status.includes('Runtime') || status.includes('Compile')) return 'text-red-400'
-    if (status === 'Time Limit Exceeded') return 'text-yellow-400'
-    return 'text-gray-400'
+    if (status === 'Accepted') return 'text-brand-emerald'
+    if (status.includes('Error') || status.includes('Runtime') || status.includes('Compile')) return 'text-red-500'
+    if (status === 'Time Limit Exceeded') return 'text-yellow-500'
+    return 'text-gray-600'
   }
   const outputText = runResult
     ? (runResult.error || runResult.compile_output || runResult.stderr || runResult.stdout || '(no output)')
@@ -479,267 +461,269 @@ export default function RoomPage() {
   const shareButtonLocked = remoteScreenActive && !screenSharing
 
   return (
-    <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
+    <div className="h-screen bg-background text-on-surface flex flex-col overflow-hidden">
       <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+      <style>{`
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .editorial-shadow {
+          box-shadow: 0 32px 64px -12px rgba(42, 52, 57, 0.06);
+        }
+      `}</style>
 
-      {/* ── Top Bar ── */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800">
-        <div className="flex items-center gap-3">
-          <span className="text-blue-400 font-bold">💻 Interview Platform</span>
-          <span className="text-gray-500">|</span>
-          <span className="text-gray-400 text-sm">Room: <span className="text-white font-mono">{roomId}</span></span>
-          <button onClick={copyRoomId} className={`text-xs px-2 py-1 rounded transition ${copied ? 'bg-green-700 text-white' : 'bg-gray-800 hover:bg-gray-700'}`}>
-            {copied ? '✅ Copied!' : 'Copy ID'}
+      {/* ═══ TOP APP BAR ═══ */}
+      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-10 h-16 bg-white/80 backdrop-blur-xl shadow-sm border-b border-outline-variant/10">
+        <div className="flex items-center gap-6">
+          <span className="text-xl font-black tracking-tighter text-on-primary font-headline">Interview Elite</span>
+          <div className="h-4 w-px bg-outline-variant/30"></div>
+          <div className="flex items-center gap-4">
+            <span className="font-headline font-bold text-sm tracking-tight text-brand-indigo">{formatTime(timerSeconds)}</span>
+            <span className="font-headline font-medium text-sm tracking-tight text-on-surface">Room ID: {roomId}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <button className="p-2 rounded-full hover:bg-surface-container-low transition-colors active:scale-95 text-on-surface-variant">
+            <span className="material-symbols-outlined">settings</span>
           </button>
+          <button className="p-2 rounded-full hover:bg-surface-container-low transition-colors active:scale-95 text-on-surface-variant">
+            <span className="material-symbols-outlined">help</span>
+          </button>
+          <div className="ml-4 flex items-center gap-2 bg-brand-emerald/10 text-brand-emerald px-4 py-1.5 rounded-full border border-brand-emerald/20">
+            <span className="w-2 h-2 rounded-full bg-brand-emerald animate-pulse"></span>
+            <span className="text-xs font-bold font-headline uppercase tracking-wider">Interview Live</span>
+          </div>
         </div>
+      </header>
 
-        {/* Timer */}
-        <div className="flex items-center gap-2">
-          {timerSeconds > 0 || timerRunning ? (
-            <>
-              <span className={`font-mono text-lg font-bold tabular-nums ${timerColor} ${timerSeconds <= 60 && timerRunning ? 'animate-pulse' : ''}`}>
-                ⏱ {formatTime(timerSeconds)}
+      {/* ═══ MAIN LAYOUT ═══ */}
+      <main className="ml-20 mt-16 grid grid-cols-12 h-[calc(100vh-128px)] overflow-hidden">
+        
+        {/* ═══ LEFT SIDEBAR (TOOLS) ═══ */}
+        <aside className="fixed left-0 top-16 h-[calc(100vh-128px)] w-20 flex flex-col items-center py-8 space-y-8 bg-surface-container-low border-r border-outline-variant/10 z-40">
+          <div className="flex flex-col items-center space-y-1 mb-4">
+            <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em] text-brand-indigo">Tools</span>
+          </div>
+          <nav className="flex flex-col items-center space-y-6 w-full">
+            <button onClick={() => setActiveTab('code')} className={`w-full flex flex-col items-center gap-1 py-3 transition-all duration-300 ${activeTab === 'code' ? 'text-brand-indigo border-r-4 border-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
+              <span className="material-symbols-outlined" style={{ fontVariationSettings: `'FILL' ${activeTab === 'code' ? 1 : 0}` }}>code</span>
+              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Editor</span>
+            </button>
+            <button onClick={() => setActiveTab('whiteboard')} className={`w-full flex flex-col items-center gap-1 py-3 transition-all duration-300 ${activeTab === 'whiteboard' ? 'text-brand-indigo border-r-4 border-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
+              <span className="material-symbols-outlined">draw</span>
+              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Board</span>
+            </button>
+            <button className="w-full flex flex-col items-center gap-1 py-3 text-on-surface-variant hover:text-brand-indigo transition-all duration-300">
+              <span className="material-symbols-outlined">terminal</span>
+              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Terminal</span>
+            </button>
+            <button className="w-full flex flex-col items-center gap-1 py-3 text-on-surface-variant hover:text-brand-indigo transition-all duration-300">
+              <span className="material-symbols-outlined">forum</span>
+              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Chat</span>
+            </button>
+          </nav>
+        </aside>
+
+        {/* ═══ CENTER: EDITOR ═══ */}
+        <section className="col-span-8 p-6 bg-surface-container-low overflow-hidden flex flex-col gap-4">
+          {/* Toolbar */}
+          <div className="flex justify-between items-center px-4 py-2">
+            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-outline-variant/10">
+              <span className="text-xs font-bold font-headline text-brand-indigo">
+                {activeTab === 'code' ? `${language}.` : 'whiteboard.'}
               </span>
-              {timerRunning
-                ? <button onClick={handlePauseTimer}  className="text-xs px-2 py-1 bg-yellow-700 hover:bg-yellow-600 rounded transition">Pause</button>
-                : <button onClick={handleResumeTimer} className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">Resume</button>
-              }
-              <button onClick={handleResetTimer} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">Reset</button>
-            </>
-          ) : showTimerInput ? (
-            <div className="flex items-center gap-2">
-              <input type="number" value={timerInput} onChange={e => setTimerInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleStartTimer()}
-                className="w-16 bg-gray-800 text-white text-sm px-2 py-1 rounded border border-gray-700 focus:outline-none focus:border-blue-500 text-center"
-                placeholder="min" min="1" max="180" />
-              <span className="text-gray-400 text-xs">min</span>
-              <button onClick={handleStartTimer}           className="text-xs px-2 py-1 bg-green-700 hover:bg-green-600 rounded transition">▶ Start</button>
-              <button onClick={() => setShowTimerInput(false)} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded transition">✕</button>
+              <span className="material-symbols-outlined text-sm text-outline cursor-pointer" style={{ fontSize: '18px' }}>close</span>
             </div>
-          ) : (
-            <button onClick={() => setShowTimerInput(true)} className="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg transition">⏱ Set Timer</button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          {messages.length > 0 && <span className="text-xs text-gray-400">{messages[messages.length - 1]}</span>}
-          <span className="text-gray-400 text-sm">👤 {username}</span>
-          <span className="text-gray-400 text-sm">🟢 {participants} online</span>
-          <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`} />
-        </div>
-      </div>
-
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* ── Left ── */}
-        <div className="w-72 bg-gray-900 border-r border-gray-800 flex flex-col">
-          <div className="p-3 flex flex-col gap-3">
-            <div className="flex gap-2">
-              <div className="flex-1 rounded-lg overflow-hidden relative" style={{ aspectRatio: '4/3', background: '#1f2937' }}>
-                <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-                <div ref={localOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs"
-                  style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>🎥 You</div>
-              </div>
-              <div className="flex-1 rounded-lg overflow-hidden relative" style={{ aspectRatio: '4/3', background: '#1f2937' }}>
-                <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-                <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs"
-                  style={{ opacity: 1, background: '#1f2937', zIndex: 10, transition: 'opacity 0.2s' }}>👤 Them</div>
-              </div>
-            </div>
-            <div className="rounded-lg overflow-hidden relative w-full" style={{ aspectRatio: '16/9', background: '#111827' }}>
-              <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-contain bg-black" />
-              <div ref={screenOverlayRef} className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 text-xs gap-1"
-                style={{ opacity: 1, background: '#111827', zIndex: 10, transition: 'opacity 0.2s' }}>
-                <span className="text-2xl">🖥</span><span>No screen share</span>
-              </div>
-              {(screenSharing || remoteScreenActive) && (
-                <div className="absolute top-2 left-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-medium z-20 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />LIVE
-                </div>
+            <div className="flex items-center gap-3">
+              {activeTab === 'code' && (
+                <>
+                  <select value={language} onChange={e => handleLanguageChange(e.target.value)}
+                    className="bg-white border border-outline-variant/20 text-on-surface text-xs px-3 py-1.5 rounded-lg font-headline font-medium">
+                    {languages.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                  <button onClick={() => setShowStdin(p => !p)} className={`text-[10px] px-3 py-1.5 rounded-lg font-headline font-bold uppercase tracking-widest transition ${showStdin ? 'bg-brand-indigo/20 text-brand-indigo border border-brand-indigo/20' : 'bg-white border border-outline-variant/10 text-on-surface-variant hover:text-on-surface'}`}>
+                    stdin
+                  </button>
+                  <button onClick={runCode} disabled={running} className="bg-brand-emerald text-white px-6 py-2 rounded-lg font-headline font-bold text-xs uppercase tracking-widest flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all editorial-shadow disabled:opacity-50">
+                    <span className="material-symbols-outlined text-sm">play_arrow</span>
+                    {running ? 'Running...' : 'Run Code'}
+                  </button>
+                </>
               )}
             </div>
-            <div className="flex gap-2">
-              {!videoActive
-                ? <button onClick={startVideoCall} className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 rounded-lg text-xs font-medium transition">🎥 Camera</button>
-                : <button onClick={stopVideo}      className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition">⏹ Camera</button>
-              }
-              {screenSharing
-                ? <button onClick={stopScreenShare}  className="flex-1 py-1.5 bg-orange-600 hover:bg-orange-700 rounded-lg text-xs font-medium transition">⏹ Share</button>
-                : <button onClick={startScreenShare} disabled={shareButtonLocked}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition ${shareButtonLocked ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
-                    🖥 Share
-                  </button>
-              }
-              <button onClick={toggleMute} disabled={!micReady}
-                className={`flex-1 py-1.5 rounded-lg text-xs transition ${!micReady ? 'bg-gray-700 text-gray-500 cursor-not-allowed opacity-50' : muted ? 'bg-red-800 hover:bg-red-700' : 'bg-gray-800 hover:bg-gray-700'}`}>
-                {muted ? '🔇' : '🎤'}
-              </button>
-            </div>
-            {shareButtonLocked && <p className="text-xs text-center text-gray-500">🔒 Screen sharing in use by the other participant</p>}
           </div>
 
-          <div className="border-t border-gray-800 mx-3" />
-
-          <div className="flex flex-col flex-1 overflow-hidden p-3 gap-2">
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wide">💬 Chat</div>
-            <div className="flex-1 overflow-y-auto flex flex-col gap-2 pr-1">
-              {chatMessages.length === 0 && <div className="text-center text-gray-600 text-xs mt-4">No messages yet. Say hi! 👋</div>}
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex flex-col gap-0.5 ${msg.self ? 'items-end' : 'items-start'}`}>
-                  <span className="text-xs text-gray-500 px-1">{msg.self ? 'You' : msg.sender}</span>
-                  <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-snug break-words ${msg.self ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-700 text-gray-100 rounded-tl-sm'}`}>
-                    {msg.text}
-                  </div>
-                  <span className="text-xs text-gray-600 px-1">{msg.time}</span>
-                </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-            <div className="flex gap-2 items-center">
-              <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Type a message..."
-                className="flex-1 bg-gray-800 text-white text-sm px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 placeholder-gray-500" />
-              <button onClick={sendMessage} disabled={!chatInput.trim()}
-                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-3 py-2 rounded-xl text-sm transition">➤</button>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Center: Editor + Output ── */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-
-          {/* Toolbar */}
-          <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
-            <button onClick={() => setActiveTab('code')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'code' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>💻 Code Editor</button>
-            <button onClick={() => setActiveTab('whiteboard')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition ${activeTab === 'whiteboard' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}>🎨 Whiteboard</button>
-            {activeTab === 'code' && (
-              <div className="ml-auto flex items-center gap-2">
-                <select value={language} onChange={e => handleLanguageChange(e.target.value)}
-                  className="bg-gray-800 text-gray-300 text-sm px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none">
-                  {languages.map(l => <option key={l} value={l}>{l}</option>)}
-                </select>
-                {/* stdin toggle */}
-                <button onClick={() => setShowStdin(p => !p)}
-                  className={`text-xs px-2 py-1.5 rounded-lg border transition ${showStdin ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-800 border-gray-700 text-gray-400 hover:text-white'}`}
-                  title="Toggle stdin input">
-                  stdin
-                </button>
-                {/* Run button */}
-                <button onClick={runCode} disabled={running}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white rounded-lg font-medium transition">
-                  {running ? '⏳ Running...' : '▶ Run'}
-                </button>
-                <button onClick={downloadCode}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 hover:text-white rounded-lg transition">
-                  ⬇ solution.{EXTENSIONS[language] || 'txt'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Stdin row */}
-          {activeTab === 'code' && showStdin && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-gray-900 border-b border-gray-800">
-              <span className="text-xs text-gray-400 shrink-0">stdin:</span>
-              <input type="text" value={stdinInput} onChange={e => setStdinInput(e.target.value)}
-                placeholder="Enter input for your program (optional)"
-                className="flex-1 bg-gray-800 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-green-500 placeholder-gray-600 font-mono" />
-            </div>
-          )}
-
-          {/* Editor */}
+          {/* Code Area */}
           {activeTab === 'code' && (
-            <div className="flex-1 flex flex-col" style={{ minHeight: 0 }}>
-              <div className="flex-1">
-                <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs-dark"
+            <div className="flex-grow bg-white rounded-lg editorial-shadow overflow-hidden flex flex-col">
+              {showStdin && (
+                <div className="flex items-center gap-2 px-4 py-2 bg-surface-container-high border-b border-outline-variant/10">
+                  <span className="text-xs text-on-surface-variant font-headline font-bold">stdin:</span>
+                  <input type="text" value={stdinInput} onChange={e => setStdinInput(e.target.value)}
+                    placeholder="Enter input for your program (optional)"
+                    className="flex-1 bg-white border-b-2 border-primary/30 text-on-surface text-xs px-2 py-1 focus:outline-none focus:border-primary focus:ring-0 font-mono" />
+                </div>
+              )}
+              <div className="flex-grow">
+                <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs"
                   options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
               </div>
 
-              {/* ── Output Panel (slides up) ── */}
               {outputOpen && (
-                <div className="border-t border-gray-700 bg-gray-950 flex flex-col" style={{ height: '220px' }}>
-                  {/* Output header */}
-                  <div className="flex items-center justify-between px-4 py-1.5 bg-gray-900 border-b border-gray-800">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-semibold text-gray-300">Output</span>
-                      {runResult && (
-                        <>
-                          <span className={`text-xs font-medium ${getStatusColor(runResult.status)}`}>
-                            {runResult.status}
-                          </span>
-                          {runResult.time && (
-                            <span className="text-xs text-gray-500">⏱ {runResult.time}s</span>
-                          )}
-                          {runResult.memory && (
-                            <span className="text-xs text-gray-500">💾 {(runResult.memory / 1024).toFixed(1)} MB</span>
-                          )}
-                        </>
-                      )}
-                      {running && <span className="text-xs text-yellow-400 animate-pulse">Running...</span>}
-                    </div>
-                    <button onClick={() => setOutputOpen(false)} className="text-gray-500 hover:text-white text-xs transition">✕ Close</button>
+                <div className="h-32 bg-on-surface text-white p-6 font-mono text-xs border-t border-outline-variant/10 overflow-y-auto">
+                  <div className="flex items-center gap-2 mb-2 text-brand-emerald">
+                    <span className="material-symbols-outlined text-sm">terminal</span>
+                    <span className="font-bold font-headline uppercase tracking-widest">Output Console</span>
                   </div>
-                  {/* Output content */}
-                  <div className="flex-1 overflow-y-auto p-3">
-                    {running ? (
-                      <div className="text-yellow-400 text-xs animate-pulse">⏳ Executing your code...</div>
-                    ) : runResult ? (
-                      <pre className={`text-xs font-mono whitespace-pre-wrap break-words leading-relaxed ${
-                        runResult.error || runResult.stderr || runResult.compile_output
-                          ? 'text-red-400' : 'text-green-300'
-                      }`}>
-                        {outputText}
-                      </pre>
-                    ) : null}
-                  </div>
+                  {running ? (
+                    <p className="text-yellow-300 animate-pulse">&gt; Executing your code...</p>
+                  ) : runResult ? (
+                    <pre className={`whitespace-pre-wrap break-words ${getStatusColor(runResult.status)}`}>
+                      {outputText}
+                    </pre>
+                  ) : null}
                 </div>
               )}
             </div>
           )}
 
+          {/* Whiteboard */}
           {activeTab === 'whiteboard' && (
-            <div className="flex-1 bg-white relative">
+            <div className="flex-grow bg-white rounded-lg editorial-shadow overflow-hidden relative">
               <canvas ref={canvasRef} className="w-full h-full" style={{ touchAction: 'none', cursor: 'crosshair' }} />
-              <div className="absolute top-3 left-3 flex items-center gap-2 bg-white rounded-lg shadow-md p-2 border border-gray-200">
+              <div className="absolute top-3 left-3 flex items-center gap-2 bg-white rounded-lg shadow-md p-2 border border-outline-variant/10">
                 {['#000000', '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#ffffff'].map(color => (
                   <button key={color} onClick={() => setBrushColor(color)} className="w-7 h-7 rounded-full border-2 shadow transition"
                     style={{ backgroundColor: color, borderColor: brushColor === color ? '#6366f1' : '#e5e7eb', transform: brushColor === color ? 'scale(1.2)' : 'scale(1)' }} />
                 ))}
-                <div className="w-px h-6 bg-gray-200 mx-1" />
+                <div className="w-px h-6 bg-outline-variant/20 mx-1" />
                 {[2, 5, 10].map(size => (
-                  <button key={size} onClick={() => setBrushSize(size)} className={`rounded-full bg-gray-800 transition ${brushSize === size ? 'ring-2 ring-blue-500' : ''}`}
+                  <button key={size} onClick={() => setBrushSize(size)} className={`rounded-full bg-gray-300 transition ${brushSize === size ? 'ring-2 ring-brand-indigo' : ''}`}
                     style={{ width: size * 2 + 8, height: size * 2 + 8 }} />
                 ))}
-                <div className="w-px h-6 bg-gray-200 mx-1" />
-                <button onClick={clearCanvas} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200">Clear</button>
+                <div className="w-px h-6 bg-outline-variant/20 mx-1" />
+                <button onClick={clearCanvas} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 font-headline font-bold">Clear</button>
               </div>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* ── Right: AI Feedback ── */}
-        <div className="w-72 bg-gray-900 border-l border-gray-800 flex flex-col">
-          <div className="p-3 border-b border-gray-800">
-            <h3 className="text-sm font-semibold text-gray-300">🤖 AI Feedback</h3>
-            <p className="text-xs text-gray-500 mt-0.5">Powered by Llama 3.3 via Groq</p>
+        {/* ═══ RIGHT SIDEBAR: VIDEO & AI ═══ */}
+        <section className="col-span-4 bg-surface-container-low border-l border-outline-variant/10 p-6 flex flex-col gap-6 overflow-y-auto">
+          {/* Video Feeds */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="relative bg-on-surface rounded-xl overflow-hidden editorial-shadow group" style={{ aspectRatio: '1' }}>
+              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              <div ref={localOverlayRef} className="absolute inset-0 flex items-center justify-center bg-on-surface" style={{ opacity: 1, zIndex: 10, transition: 'opacity 0.2s' }}>
+                <span className="text-white text-sm font-headline font-bold">You</span>
+              </div>
+              <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/40 backdrop-blur-md rounded text-[10px] text-white font-bold font-headline uppercase tracking-wider">You</div>
+            </div>
+            <div className="relative bg-on-surface rounded-xl overflow-hidden editorial-shadow group" style={{ aspectRatio: '1' }}>
+              <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+              <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center bg-on-surface" style={{ opacity: 1, zIndex: 10, transition: 'opacity 0.2s' }}>
+                <span className="text-white text-sm font-headline font-bold">Interviewer</span>
+              </div>
+              <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/40 backdrop-blur-md rounded text-[10px] text-white font-bold font-headline uppercase tracking-wider">Interviewer</div>
+            </div>
           </div>
-          <div className="flex-1 p-3 overflow-y-auto">
-            {loadingFeedback
-              ? <div className="text-gray-400 text-sm text-center mt-8 animate-pulse">⏳ Analyzing your code...</div>
-              : feedback
-                ? <div className="text-sm leading-relaxed">{renderFeedback(feedback)}</div>
-                : <div className="text-gray-500 text-sm text-center mt-8">Write some code and click "Get Feedback" to receive AI analysis</div>
-            }
-          </div>
-          <div className="p-3 border-t border-gray-800">
-            <button onClick={getAIFeedback} disabled={loadingFeedback}
-              className="w-full py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg text-sm font-medium transition">
-              {loadingFeedback ? '⏳ Analyzing...' : '✨ Get AI Feedback'}
-            </button>
-          </div>
-        </div>
 
-      </div>
+          {/* Screen Share */}
+          <div className="relative bg-on-surface rounded-xl overflow-hidden editorial-shadow" style={{ aspectRatio: '16/9' }}>
+            <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-contain bg-black" />
+            <div ref={screenOverlayRef} className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 text-xs gap-1" style={{ opacity: 1, background: '#111827', zIndex: 10, transition: 'opacity 0.2s' }}>
+              <span className="text-2xl">🖥</span>
+              <span>No screen share</span>
+            </div>
+            {(screenSharing || remoteScreenActive) && (
+              <div className="absolute top-2 right-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-bold z-20 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />LIVE
+              </div>
+            )}
+          </div>
+
+          {/* AI Insights */}
+          <div className="space-y-2">
+            <h3 className="font-headline font-black text-lg text-brand-indigo flex items-center gap-2 uppercase tracking-tighter">
+              <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
+              AI Technical Insights
+            </h3>
+            <p className="text-xs text-on-surface-variant font-body">Real-time performance metrics and architectural feedback.</p>
+          </div>
+
+          {/* Metrics */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white p-4 rounded-xl border border-outline-variant/10 editorial-shadow">
+              <span className="text-[9px] font-bold font-headline text-on-surface-variant uppercase tracking-widest block mb-2">Code Efficiency</span>
+              <div className="flex items-end gap-2">
+                <span className="text-2xl font-black text-on-surface font-headline">92%</span>
+                <span className="text-[10px] text-brand-emerald font-bold font-headline mb-1">+4%</span>
+              </div>
+            </div>
+            <div className="bg-white p-4 rounded-xl border border-outline-variant/10 editorial-shadow">
+              <span className="text-[9px] font-bold font-headline text-on-surface-variant uppercase tracking-widest block mb-2">Comm. Score</span>
+              <div className="flex items-end gap-2">
+                <span className="text-2xl font-black text-on-surface font-headline">88</span>
+                <span className="text-[10px] text-brand-indigo font-bold font-headline mb-1">High</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Feedback Cards */}
+          <div className="space-y-3">
+            <div className="bg-brand-indigo/[0.03] p-4 rounded-xl border-l-4 border-brand-indigo">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-bold font-headline uppercase text-brand-indigo tracking-widest">Logic Insight</span>
+                <span className="text-[10px] text-on-surface-variant">Just now</span>
+              </div>
+              <p className="text-xs text-on-surface leading-relaxed">
+                The candidate is correctly using <span className="font-bold text-brand-indigo">Recursive Depth-First Search</span>.
+              </p>
+            </div>
+            <div className="bg-brand-emerald/[0.03] p-4 rounded-xl border-l-4 border-brand-emerald">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-bold font-headline uppercase text-brand-emerald tracking-widest">Optimization</span>
+                <span className="text-[10px] text-on-surface-variant">2m ago</span>
+              </div>
+              <p className="text-xs text-on-surface leading-relaxed">
+                Consider <span className="font-bold text-brand-emerald">Iterative BFS</span> for memory optimization.
+              </p>
+            </div>
+          </div>
+
+          {/* AI Feedback Button */}
+          <button onClick={getAIFeedback} disabled={loadingFeedback} className="w-full py-3 bg-brand-indigo text-white rounded-lg font-headline font-bold text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all disabled:opacity-50">
+            {loadingFeedback ? '⏳ Analyzing...' : '✨ Get AI Feedback'}
+          </button>
+        </section>
+      </main>
+
+      {/* ═══ BOTTOM NAV ═══ */}
+      <nav className="fixed bottom-0 left-0 w-full flex justify-center items-center space-x-12 px-12 z-50 bg-white/90 backdrop-blur-2xl h-16 border-t border-outline-variant/10">
+        <div className="flex items-center space-x-8">
+          <button onClick={toggleMute} disabled={!micReady} className={`flex flex-col items-center justify-center transition-transform active:scale-95 duration-150 ${!micReady ? 'opacity-50 cursor-not-allowed' : muted ? 'text-red-600' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
+            <span className="material-symbols-outlined">mic</span>
+            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Mic</span>
+          </button>
+          <button onClick={startVideoCall} disabled={videoActive} className={`flex flex-col items-center justify-center transition-transform hover:scale-110 active:scale-95 duration-150 ${videoActive ? 'text-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
+            <span className="material-symbols-outlined">videocam</span>
+            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Camera</span>
+          </button>
+          <button onClick={startScreenShare} disabled={shareButtonLocked} className={`bg-brand-indigo text-white rounded-xl px-6 py-2 flex items-center gap-2 hover:scale-110 transition-transform active:scale-95 duration-150 ${shareButtonLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
+            <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>screen_share</span>
+            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Share</span>
+          </button>
+          <button className="flex flex-col items-center justify-center text-on-surface-variant hover:text-brand-indigo transition-transform hover:scale-110 active:scale-95 duration-150">
+            <span className="material-symbols-outlined">radio_button_checked</span>
+            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Record</span>
+          </button>
+        </div>
+        <div className="h-8 w-px bg-outline-variant/20 mx-4"></div>
+        <button className="flex items-center gap-3 px-6 py-2 bg-red-500 text-white rounded-xl font-headline font-bold text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-red-500/20">
+          <span className="material-symbols-outlined text-sm">call_end</span>
+          Leave
+        </button>
+      </nav>
     </div>
   )
 }
