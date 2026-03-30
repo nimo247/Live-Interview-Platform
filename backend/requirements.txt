@@ -4,4 +4,4 @@ python-socketio
 python-multipart
 aiofiles
 websockets
-echo "python-dotenv"
+python-dotenv

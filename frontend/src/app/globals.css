@@ -1,26 +1,77 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  --color-primary: #5352a5;
+  --color-secondary: #006947;
+  --color-tertiary: #4647d3;
+  --color-surface: #f3f7fb;
+  --color-surface-container-low: #ecf1f6;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-high: #dde3e8;
+  --color-surface-container-highest: #d7dee3;
+  --color-on-surface: #2a2f32;
+  --color-on-surface-variant: #575c60;
+  --color-primary-container: #a19ff9;
+  --color-secondary-container: #69f6b8;
+  --color-secondary-fixed: #58e7ab;
+  --color-on-primary-container: #201c71;
+  --color-on-secondary-container: #005a3c;
+  --color-error-container: #f74b6d;
+  --color-on-error-container: #510017;
+  --color-outline-variant: #a9aeb1;
+  --color-outline: #73777b;
+  --color-inverse-surface: #0a0f12;
+  --color-inverse-on-surface: #999da1;
+
+  --font-montserrat: "Montserrat";
+  --font-body: "Montserrat";
+  --font-headline: "Montserrat";
+  --font-label: "Montserrat";
+
+  --radius-0: 0.375rem;
+  --radius-1: 0.5rem;
+  --radius-2: 0.75rem;
+  --radius-full: 9999px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@layer base {
+  html {
+    font-family: "Montserrat", sans-serif;
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  body {
+    background: #f3f7fb;
+    color: #2a2f32;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .btn-primary {
+    @apply px-8 py-4 bg-primary text-white rounded-xl font-bold shadow-xl transition-all hover:scale-[1.02];
+  }
+
+  .btn-secondary {
+    @apply px-8 py-4 bg-white border-2 border-primary/20 text-primary rounded-xl font-bold transition-all hover:bg-surface-container-low hover:border-primary;
+  }
+
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(12px);
+  }
+
+  .tonal-depth {
+    box-shadow: 0 24px 48px -12px rgba(49, 46, 129, 0.06);
+  }
+
+  .status-badge {
+    @apply inline-flex items-center gap-2 px-3 py-1 bg-secondary-container/30 border border-secondary/20 rounded-full;
+  }
+
+  .metric-card {
+    @apply bg-white p-8 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-48;
+  }
+
+  .eval-item {
+    @apply bg-white p-6 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-6 hover:shadow-md transition-shadow border border-white;
+  }
 }

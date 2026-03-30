@@ -7,7 +7,6 @@ export default function HomePage() {
   const [username, setUsername] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [loading, setLoading] = useState(false)
-  const [joining, setJoining] = useState(false)
   const [error, setError] = useState('')
 
   const createRoom = async () => {
@@ -28,287 +27,295 @@ export default function HomePage() {
     if (!username.trim()) return setError('Please enter your name first')
     if (!joinCode.trim()) return setError('Please enter a room code')
     setError('')
-    setJoining(true)
     router.push(`/room/${joinCode.trim().toUpperCase()}?username=${encodeURIComponent(username)}`)
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-white overflow-hidden" style={{ fontFamily: "'Syne', sans-serif" }}>
-
-      {/* Google Fonts */}
+    <div className="light bg-surface text-on-surface font-montserrat selection:bg-primary-container selection:text-on-primary-container">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
         * { box-sizing: border-box; }
 
-        .gradient-text {
-          background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 40%, #06b6d4 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-          background-clip: text;
+        :root {
+          --primary: #5352a5;
+          --secondary: #006947;
+          --tertiary: #4647d3;
+          --surface: #f3f7fb;
+          --surface-container-low: #ecf1f6;
+          --surface-container-lowest: #ffffff;
+          --surface-container-high: #dde3e8;
+          --surface-container-highest: #d7dee3;
+          --on-surface: #2a2f32;
+          --on-surface-variant: #575c60;
+          --primary-container: #a19ff9;
+          --secondary-container: #69f6b8;
+          --on-primary-container: #201c71;
+          --on-secondary-container: #005a3c;
+          --error-container: #f74b6d;
+          --on-error-container: #510017;
         }
 
-        .card-glow {
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.07);
-          backdrop-filter: blur(20px);
-          transition: all 0.3s ease;
-        }
-        .card-glow:hover {
-          background: rgba(255,255,255,0.05);
-          border-color: rgba(99,102,241,0.3);
-          box-shadow: 0 0 40px rgba(99,102,241,0.08);
+        .glass-panel {
+          background: rgba(255, 255, 255, 0.8);
+          backdrop-filter: blur(12px);
         }
 
-        .btn-primary {
-          background: linear-gradient(135deg, #6366f1, #8b5cf6);
-          transition: all 0.3s ease;
-          position: relative;
-          overflow: hidden;
-        }
-        .btn-primary::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(135deg, #818cf8, #a78bfa);
-          opacity: 0;
-          transition: opacity 0.3s ease;
-        }
-        .btn-primary:hover::after { opacity: 1; }
-        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 40px rgba(99,102,241,0.4); }
-        .btn-primary span { position: relative; z-index: 1; }
-
-        .btn-secondary {
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.1);
-          transition: all 0.3s ease;
-        }
-        .btn-secondary:hover {
-          background: rgba(255,255,255,0.08);
-          border-color: rgba(255,255,255,0.2);
-          transform: translateY(-1px);
+        .tonal-depth {
+          box-shadow: 0 24px 48px -12px rgba(49, 46, 129, 0.06);
         }
 
-        .input-field {
-          background: rgba(255,255,255,0.04);
-          border: 1px solid rgba(255,255,255,0.08);
-          transition: all 0.3s ease;
-          color: white;
-          font-family: 'JetBrains Mono', monospace;
-        }
-        .input-field:focus {
-          outline: none;
-          background: rgba(255,255,255,0.06);
-          border-color: rgba(99,102,241,0.5);
-          box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
-        }
-        .input-field::placeholder { color: rgba(255,255,255,0.25); }
-
-        .feature-icon {
-          background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));
-          border: 1px solid rgba(99,102,241,0.2);
+        .emerald-pulse {
+          box-shadow: 0 0 0 0 rgba(0, 105, 71, 0.4);
+          animation: pulse-anim 2s infinite;
         }
 
-        .noise-overlay {
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          z-index: 0;
-          opacity: 0.03;
-          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-          background-size: 128px;
+        @keyframes pulse-anim {
+          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 105, 71, 0.7); }
+          70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 105, 71, 0); }
+          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 105, 71, 0); }
         }
 
-        .orb {
-          position: absolute;
-          border-radius: 50%;
-          filter: blur(80px);
-          opacity: 0.15;
-          pointer-events: none;
-        }
-
-        .status-dot {
-          width: 6px;
-          height: 6px;
-          border-radius: 50%;
-          background: #10b981;
-          box-shadow: 0 0 8px #10b981;
-          animation: blink 2s ease-in-out infinite;
-        }
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-
-        .tag {
-          background: rgba(99,102,241,0.1);
-          border: 1px solid rgba(99,102,241,0.2);
-          color: #a5b4fc;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          padding: 3px 10px;
-          border-radius: 99px;
-        }
-
-        .divider {
-          height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent);
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+          vertical-align: middle;
         }
       `}</style>
 
-      {/* Background effects */}
-      <div className="noise-overlay" />
-      <div className="orb" style={{ width: 600, height: 600, background: 'radial-gradient(circle, #6366f1, transparent)', top: -100, right: -100 }} />
-      <div className="orb" style={{ width: 500, height: 500, background: 'radial-gradient(circle, #8b5cf6, transparent)', bottom: -100, left: -50 }} />
-      <div className="orb" style={{ width: 400, height: 400, background: 'radial-gradient(circle, #06b6d4, transparent)', top: '40%', left: '40%', opacity: 0.06 }} />
-
-      {/* Nav */}
-      <nav style={{ position: 'relative', zIndex: 10 }} className="flex items-center justify-between px-8 py-6 border-b border-white/5">
-        <div className="flex items-center gap-3">
-          <div style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-              <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
-            </svg>
-          </div>
-          <span style={{ fontSize: 17, fontWeight: 700, letterSpacing: '-0.02em' }}>LiveInterview</span>
+      {/* TopNavBar */}
+      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-6 h-16 bg-slate-50/80 backdrop-blur-xl shadow-sm border-b border-slate-200/50">
+        <div className="flex items-center gap-8">
+          <span className="text-xl font-bold text-indigo-900 tracking-tight">TechCode Pro</span>
+          <nav className="hidden md:flex items-center gap-6">
+            <a className="text-indigo-700 font-bold border-b-2 border-indigo-600 px-1 py-4 tracking-tight" href="#">Home</a>
+            <a className="text-slate-500 font-medium hover:text-indigo-600 transition-colors tracking-tight" href="#">Timer: 45:00</a>
+            <a className="text-slate-500 font-medium hover:text-indigo-600 transition-colors tracking-tight" href="#">Room: #XC-921</a>
+          </nav>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="status-dot" />
-          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', fontFamily: 'JetBrains Mono, monospace' }}>All systems operational</span>
-        </div>
-      </nav>
-
-      {/* Main */}
-      <main style={{ position: 'relative', zIndex: 1 }} className="px-8 pt-20 pb-32 max-w-6xl mx-auto">
-
-        {/* Hero */}
-        <div className="text-center mb-20">
-          <div className="inline-flex items-center gap-2 mb-8">
-            <span className="tag">v2.0 — Now with code execution</span>
-          </div>
-          <h1 style={{ fontSize: 'clamp(48px, 7vw, 88px)', fontWeight: 800, lineHeight: 1.05, letterSpacing: '-0.04em', marginBottom: 24 }}>
-            The interview platform<br />
-            <span className="gradient-text">built for engineers</span>
-          </h1>
-          <p style={{ fontSize: 18, color: 'rgba(255,255,255,0.45)', maxWidth: 520, margin: '0 auto', lineHeight: 1.7, fontWeight: 400 }}>
-            Real-time code sync, video, whiteboard, AI feedback and code execution — everything in one room.
-          </p>
-        </div>
-
-        {/* Main card */}
-        <div style={{ maxWidth: 520, margin: '0 auto 80px', borderRadius: 20 }} className="card-glow p-8">
-
-          {/* Name input */}
-          <div style={{ marginBottom: 20 }}>
-            <label style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', display: 'block', marginBottom: 8 }}>
-              Your Name
-            </label>
-            <input
-              type="text"
-              placeholder="e.g. Naman"
-              value={username}
-              onChange={e => { setUsername(e.target.value); setError('') }}
-              onKeyDown={e => e.key === 'Enter' && createRoom()}
-              className="input-field w-full px-4 py-3 rounded-xl text-sm"
-            />
-          </div>
-
-          {/* Error */}
-          {error && (
-            <div style={{ fontSize: 12, color: '#f87171', marginBottom: 16, padding: '8px 12px', background: 'rgba(248,113,113,0.08)', borderRadius: 8, border: '1px solid rgba(248,113,113,0.15)' }}>
-              {error}
-            </div>
-          )}
-
-          {/* Create room button */}
-          <button onClick={createRoom} disabled={loading} className="btn-primary w-full py-4 rounded-xl font-semibold text-sm mb-4" style={{ opacity: loading ? 0.7 : 1 }}>
-            <span>{loading ? '⏳ Creating room...' : '✦ Create New Room'}</span>
+        <div className="flex items-center gap-4">
+          <button className="p-2 text-slate-500 hover:text-indigo-600 transition-colors">
+            <span className="material-symbols-outlined">settings</span>
           </button>
-
-          {/* Divider */}
-          <div className="flex items-center gap-4 my-5">
-            <div className="divider flex-1" />
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', fontFamily: 'JetBrains Mono, monospace' }}>or join existing</span>
-            <div className="divider flex-1" />
-          </div>
-
-          {/* Join room */}
-          <div className="flex gap-3">
-            <input
-              type="text"
-              placeholder="Room code (e.g. A1B2C3D4)"
-              value={joinCode}
-              onChange={e => { setJoinCode(e.target.value.toUpperCase()); setError('') }}
-              onKeyDown={e => e.key === 'Enter' && joinRoom()}
-              className="input-field flex-1 px-4 py-3 rounded-xl text-sm"
-              style={{ letterSpacing: '0.1em' }}
-            />
-            <button onClick={joinRoom} disabled={joining} className="btn-secondary px-5 rounded-xl font-semibold text-sm" style={{ whiteSpace: 'nowrap' }}>
-              {joining ? '...' : 'Join →'}
-            </button>
-          </div>
-
-          {/* Room hint */}
-          <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)', textAlign: 'center', marginTop: 16, fontFamily: 'JetBrains Mono, monospace' }}>
-            Rooms are private · Max 2 participants
-          </p>
+          <button className="p-2 text-slate-500 hover:text-indigo-600 transition-colors">
+            <span className="material-symbols-outlined">help</span>
+          </button>
+          <div className="w-8 h-8 rounded-full overflow-hidden border border-indigo-200 bg-slate-200" />
         </div>
+      </header>
 
-        {/* Features grid */}
-        <div style={{ marginBottom: 80 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.12em', color: 'rgba(255,255,255,0.25)', textTransform: 'uppercase', textAlign: 'center', marginBottom: 40 }}>
-            Everything you need in one room
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-            {[
-              { icon: '🎥', label: 'Video & Audio', desc: 'WebRTC peer-to-peer, always-on mic' },
-              { icon: '💻', label: 'Code Editor', desc: 'Monaco with live sync & 6 languages' },
-              { icon: '▶', label: 'Code Execution', desc: 'Run code instantly via Judge0' },
-              { icon: '🎨', label: 'Whiteboard', desc: 'Collaborative drawing in real time' },
-              { icon: '🖥', label: 'Screen Share', desc: 'One presenter at a time' },
-              { icon: '🤖', label: 'AI Feedback', desc: 'Llama 3.3 code review via Groq' },
-              { icon: '💬', label: 'Live Chat', desc: 'WhatsApp-style messaging' },
-              { icon: '⏱', label: 'Timer', desc: 'Synced countdown for both sides' },
-            ].map((f, i) => (
-              <div key={i} className="card-glow p-5 rounded-2xl">
-                <div className="feature-icon" style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, marginBottom: 12 }}>
-                  {f.icon}
+      {/* SideNavBar */}
+      <aside className="fixed left-0 top-16 h-[calc(100vh-64px)] z-40 flex flex-col w-20 md:w-64 bg-slate-100 border-r border-slate-200/30 transition-all duration-300 ease-in-out hidden md:flex">
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white">
+              <span className="material-symbols-outlined">terminal</span>
+            </div>
+            <div>
+              <p className="text-sm font-bold text-indigo-900">Project Alpha</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest">V8 Engine Dev</p>
+            </div>
+          </div>
+          <nav className="space-y-2">
+            <a className="flex items-center gap-3 px-4 py-3 bg-white text-indigo-600 border-l-4 border-indigo-600 text-sm font-medium transition-all rounded-r" href="#">
+              <span className="material-symbols-outlined">code</span>
+              <span>Code Editor</span>
+            </a>
+            <a className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-indigo-500 hover:bg-slate-200/50 text-sm font-medium transition-all rounded" href="#">
+              <span className="material-symbols-outlined">draw</span>
+              <span>Whiteboard</span>
+            </a>
+            <a className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-indigo-500 hover:bg-slate-200/50 text-sm font-medium transition-all rounded" href="#">
+              <span className="material-symbols-outlined">terminal</span>
+              <span>Terminal</span>
+            </a>
+            <a className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-indigo-500 hover:bg-slate-200/50 text-sm font-medium transition-all rounded" href="#">
+              <span className="material-symbols-outlined">folder_open</span>
+              <span>Files</span>
+            </a>
+            <a className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-indigo-500 hover:bg-slate-200/50 text-sm font-medium transition-all rounded" href="#">
+              <span className="material-symbols-outlined">description</span>
+              <span>Notes</span>
+            </a>
+          </nav>
+        </div>
+      </aside>
+
+      {/* Main Content Canvas */}
+      <main className="md:ml-64 pt-24 pb-32 px-6 md:px-12">
+        <div className="max-w-7xl mx-auto space-y-12">
+          {/* Hero Section */}
+          <section className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
+            <div className="lg:col-span-8 space-y-8">
+              <div className="space-y-6">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-secondary-container/30 border border-secondary/20 rounded-full">
+                  <span className="w-2 h-2 rounded-full bg-secondary emerald-pulse"></span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-on-secondary-container">System Status: Optimal</span>
                 </div>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{f.label}</div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', lineHeight: 1.6 }}>{f.desc}</div>
+                <h1 className="text-5xl md:text-7xl font-extrabold text-indigo-950 leading-[1.1] tracking-tighter">
+                  Elevate Your <span className="text-primary italic">Technical</span> Assessment
+                </h1>
+                <p className="text-lg text-on-surface-variant max-w-xl leading-relaxed">
+                  Precision-engineered environment for real-time pair programming, architecture design, and deep technical evaluation.
+                </p>
+                <div className="flex flex-wrap gap-4 pt-4">
+                  <button onClick={createRoom} disabled={loading} className="px-8 py-4 bg-primary text-white rounded-xl font-bold shadow-xl shadow-primary/20 hover:bg-indigo-700 hover:scale-[1.02] transition-all" style={{ opacity: loading ? 0.7 : 1 }}>
+                    {loading ? '⏳ Creating...' : 'Start New Interview'}
+                  </button>
+                  <button className="px-8 py-4 bg-white border-2 border-primary/20 text-primary rounded-xl font-bold hover:bg-surface-container-low hover:border-primary transition-all">
+                    View Schedule
+                  </button>
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
 
-        {/* Stack */}
-        <div className="text-center">
-          <p style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.12em', color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase', marginBottom: 20 }}>
-            Built with
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            {['Next.js', 'FastAPI', 'WebRTC', 'Socket.IO', 'Monaco', 'Judge0', 'Groq'].map(t => (
-              <span key={t} className="tag">{t}</span>
-            ))}
-          </div>
-        </div>
+              {/* Join Room Widget */}
+              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm max-w-md">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Join Existing Room</h3>
+                  <span className="material-symbols-outlined text-indigo-400 text-sm">sensors</span>
+                </div>
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    placeholder="Enter session code (e.g. XC-921)"
+                    value={joinCode}
+                    onChange={e => { setJoinCode(e.target.value.toUpperCase()); setError('') }}
+                    onKeyDown={e => e.key === 'Enter' && joinRoom()}
+                    className="flex-1 bg-surface-container-low border border-slate-200 rounded-xl text-sm px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
+                  />
+                  <button onClick={joinRoom} className="bg-indigo-600 text-white px-5 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/10">
+                    <span className="material-symbols-outlined text-sm font-bold">arrow_forward</span>
+                  </button>
+                </div>
+              </div>
+            </div>
 
+            {/* Right Visual Column */}
+            <div className="lg:col-span-4 relative hidden lg:block">
+              <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-secondary/5 blur-3xl rounded-full"></div>
+              <div className="relative space-y-6">
+                <div className="bg-white/80 backdrop-blur-md p-6 rounded-2xl border border-white/50 shadow-xl">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Live Preview</span>
+                  </div>
+                  <div className="h-32 bg-slate-100/50 rounded-lg flex items-center justify-center border border-dashed border-slate-300">
+                    <span className="material-symbols-outlined text-3xl text-slate-300">videocam</span>
+                  </div>
+                </div>
+                <div className="bg-indigo-900 p-6 rounded-2xl shadow-xl shadow-indigo-900/20">
+                  <p className="text-[10px] font-bold text-indigo-300/80 uppercase mb-3">Next Scheduled</p>
+                  <p className="text-white font-bold">Frontend Tech Lead</p>
+                  <p className="text-indigo-300 text-xs mt-1">14:00 PM - Today</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Status Metrics: Bento Style */}
+          <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-48 group hover:border-secondary/20 transition-all">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400 mb-2">Global Latency</p>
+                <h3 className="text-4xl font-extrabold text-slate-900">12<span className="text-secondary">ms</span></h3>
+              </div>
+              <div className="flex items-center gap-2 text-secondary text-sm font-bold">
+                <span className="material-symbols-outlined text-sm">trending_down</span>
+                <span>-4ms since last session</span>
+              </div>
+            </div>
+
+            <div className="bg-indigo-900 p-8 rounded-2xl shadow-xl shadow-indigo-900/10 flex flex-col justify-between h-48">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-indigo-300/60 mb-2">Uptime Reliability</p>
+                <h3 className="text-4xl font-extrabold text-white">99.99<span className="text-secondary-fixed">%</span></h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex -space-x-2">
+                  <div className="w-6 h-6 rounded-full border-2 border-indigo-900 bg-secondary"></div>
+                  <div className="w-6 h-6 rounded-full border-2 border-indigo-900 bg-secondary"></div>
+                  <div className="w-6 h-6 rounded-full border-2 border-indigo-900 bg-secondary"></div>
+                  <div className="w-6 h-6 rounded-full border-2 border-indigo-900 bg-secondary"></div>
+                </div>
+                <span className="text-[10px] font-bold text-indigo-200">Across 14 Nodes</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between h-48 group hover:border-primary/20 transition-all">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400 mb-2">Active Sessions</p>
+                <h3 className="text-4xl font-extrabold text-slate-900">1,204</h3>
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden mr-4">
+                  <div className="h-full bg-primary w-[65%] rounded-full"></div>
+                </div>
+                <span className="text-xs font-bold text-slate-600 whitespace-nowrap">65% Capacity</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Recent Evaluations */}
+          <section className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-indigo-950">Recent Evaluations</h2>
+              <button className="text-primary font-bold text-sm flex items-center gap-2 hover:underline">
+                View All <span className="material-symbols-outlined text-sm">open_in_new</span>
+              </button>
+            </div>
+            <div className="bg-surface-container-low rounded-3xl p-4 md:p-8">
+              <div className="space-y-4">
+                {/* List Item 1 */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-6 hover:shadow-md transition-shadow border border-white">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-indigo-600 font-bold">JD</div>
+                    <div>
+                      <h4 className="font-bold text-slate-900">Jane Doe</h4>
+                      <p className="text-sm text-slate-500">Senior React Engineer Role</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <span className="px-3 py-1 bg-secondary-container/20 text-on-secondary-container text-[10px] font-bold rounded-lg border border-secondary/10 uppercase">Passed</span>
+                    <span className="px-3 py-1 bg-surface-container-highest text-on-surface-variant text-[10px] font-bold rounded-lg uppercase">#XC-921</span>
+                  </div>
+                  <div className="flex items-center gap-8">
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Score</p>
+                      <p className="text-lg font-extrabold text-indigo-600">92/100</p>
+                    </div>
+                    <button className="p-2 text-slate-400 hover:text-indigo-600">
+                      <span className="material-symbols-outlined">more_vert</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* List Item 2 */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-6 hover:shadow-md transition-shadow border border-white">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-indigo-600 font-bold">MS</div>
+                    <div>
+                      <h4 className="font-bold text-slate-900">Mike Smith</h4>
+                      <p className="text-sm text-slate-500">Fullstack Developer</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <span className="px-3 py-1 bg-primary-container/20 text-on-primary-container text-[10px] font-bold rounded-lg border border-primary/10 uppercase">Reviewing</span>
+                    <span className="px-3 py-1 bg-surface-container-highest text-on-surface-variant text-[10px] font-bold rounded-lg uppercase">#XC-884</span>
+                  </div>
+                  <div className="flex items-center gap-8">
+                    <div className="text-right">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Score</p>
+                      <p className="text-lg font-extrabold text-slate-400">--</p>
+                    </div>
+                    <button className="p-2 text-slate-400 hover:text-indigo-600">
+                      <span className="material-symbols-outlined">more_vert</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
       </main>
-
-      {/* Footer */}
-      <footer style={{ position: 'relative', zIndex: 1, borderTop: '1px solid rgba(255,255,255,0.04)', padding: '24px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.2)', fontFamily: 'JetBrains Mono, monospace' }}>
-          Built by <a href="https://github.com/nimo247" target="_blank" style={{ color: 'rgba(165,180,252,0.6)', textDecoration: 'none' }}>nimo247</a> · NSUT Delhi
-        </span>
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.15)', fontFamily: 'JetBrains Mono, monospace' }}>
-          ECE 2024–2028
-        </span>
-      </footer>
-
     </div>
   )
 }
