@@ -1,0 +1,17 @@
+app = "live-interview-backend"
+primary_region = "sin" # Singapore - closest to India
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = false   # never sleep - important for Socket.IO
+  auto_start_machines = true
+  min_machines_running = 1     # always keep 1 machine alive
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
