@@ -13,7 +13,7 @@ origins = [
 # ✅ Socket.IO setup with CORS
 sio = socketio.AsyncServer(
     async_mode='asgi',
-    cors_allowed_origins=origins
+    cors_allowed_origins="*"
 )
 
 app = FastAPI(title="Live Interview Platform")
@@ -21,7 +21,7 @@ app = FastAPI(title="Live Interview Platform")
 # ✅ FastAPI CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
