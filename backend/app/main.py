@@ -3,16 +3,25 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers.rooms import router as rooms_router
 import socketio
 
+# ✅ Define allowed origins (IMPORTANT)
+origins = [
+    "http://localhost:3000",
+    "http://192.168.1.35:3000",
+    "https://live-interview-platform.vercel.app"
+]
+
+# ✅ Socket.IO setup with CORS
 sio = socketio.AsyncServer(
     async_mode='asgi',
-    cors_allowed_origins=["http://localhost:3000", "http://192.168.1.35:3000"]
+    cors_allowed_origins=origins
 )
 
 app = FastAPI(title="Live Interview Platform")
 
+# ✅ FastAPI CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://192.168.1.35:3000"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,6 +47,7 @@ async def disconnect(sid):
 async def join_room(sid, data):
     room_id = data['room_id']
     username = data['username']
+
     if room_id not in rooms:
         rooms[room_id] = {
             'participants': [],
@@ -45,19 +55,23 @@ async def join_room(sid, data):
             'language': 'javascript',
             'whiteboard': []
         }
+
     if len(rooms[room_id]['participants']) >= 2:
         await sio.emit('room_full', {
             'message': 'This interview room is full. Only 2 participants allowed.'
         }, to=sid)
         return
+
     rooms[room_id]['participants'].append(sid)
     await sio.enter_room(sid, room_id)
+
     await sio.emit('room_joined', {
         'room_id': room_id,
         'code': rooms[room_id]['code'],
         'language': rooms[room_id]['language'],
         'participants': len(rooms[room_id]['participants'])
     }, to=sid)
+
     await sio.emit('user_joined', {
         'username': username,
         'participants': len(rooms[room_id]['participants'])
@@ -94,7 +108,7 @@ async def chat_message(sid, data):
     if room_id:
         await sio.emit('chat_message', data, room=room_id, skip_sid=sid)
 
-# ── Timer ─────────────────────────────────────────────────────
+# ── Timer ─────────────────────────────────────
 @sio.event
 async def timer_start(sid, data):
     if data.get('room_id'):
@@ -115,7 +129,7 @@ async def timer_reset(sid, data):
     if data.get('room_id'):
         await sio.emit('timer_reset', {}, room=data['room_id'], skip_sid=sid)
 
-# ── WebRTC camera + audio ─────────────────────────────────────
+# ── WebRTC camera + audio ─────────────────────
 @sio.event
 async def webrtc_offer(sid, data):
     if data.get('room_id'):
@@ -133,17 +147,15 @@ async def webrtc_ice_candidate(sid, data):
 
 @sio.event
 async def video_ready(sid, data):
-    """Camera peer — other person creates non-initiator"""
     if data.get('room_id'):
         await sio.emit('peer_ready', {}, room=data['room_id'], skip_sid=sid)
 
 @sio.event
 async def audio_ready(sid, data):
-    """Audio-only peer — other person creates non-initiator audio peer"""
     if data.get('room_id'):
         await sio.emit('audio_peer_ready', {}, room=data['room_id'], skip_sid=sid)
 
-# ── WebRTC screen share ───────────────────────────────────────
+# ── Screen share ─────────────────────
 @sio.event
 async def screen_offer(sid, data):
     if data.get('room_id'):
@@ -164,5 +176,8 @@ async def screen_stopped(sid, data):
     if data.get('room_id'):
         await sio.emit('screen_stopped', {}, room=data['room_id'], skip_sid=sid)
 
+# ✅ Include routes
 app.include_router(rooms_router)
+
+# ✅ Mount socket app
 socket_app = socketio.ASGIApp(sio, app)
