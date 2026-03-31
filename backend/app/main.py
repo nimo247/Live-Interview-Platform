@@ -164,5 +164,5 @@ async def screen_stopped(sid, data):
     if data.get('room_id'):
         await sio.emit('screen_stopped', {}, room=data['room_id'], skip_sid=sid)
 
-socket_app = socketio.ASGIApp(sio, app)
 app.include_router(rooms_router)
+socket_app = socketio.ASGIApp(sio, app)

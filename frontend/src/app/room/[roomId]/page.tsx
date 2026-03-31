@@ -95,7 +95,7 @@ export default function RoomPage() {
     setOutputOpen(true)
     setRunResult(null)
     try {
-      const res = await fetch('http://localhost:8000/rooms/execute', {
+      const res = await fetch('http://192.168.1.35:8000/rooms/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language, stdin: stdinInput })
@@ -426,7 +426,7 @@ export default function RoomPage() {
   const getAIFeedback = async () => {
     setFeedback(''); setLoadingFeedback(true)
     try {
-      const res = await fetch('http://localhost:8000/rooms/ai-feedback', {
+      const res = await fetch('http://192.168.1.35:8000/rooms/ai-feedback', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language })
       })

@@ -8,26 +8,51 @@ export default function HomePage() {
   const [joinCode, setJoinCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [modalUsername, setModalUsername] = useState('')
+  const [modalError, setModalError] = useState('')
+  const [modalMode, setModalMode] = useState<'create' | 'join'>('create')
+  const [modalLoading, setModalLoading] = useState(false)
 
-  const createRoom = async () => {
-    if (!username.trim()) return setError('Please enter your name first')
-    setError('')
-    setLoading(true)
+  const openNameModal = (mode: 'create' | 'join') => {
+    setModalMode(mode)
+    setModalUsername('')
+    setModalError('')
+    setModalOpen(true)
+  }
+
+  const handleModalSubmit = async () => {
+    if (!modalUsername.trim()) {
+      setModalError('Please enter your name')
+      return
+    }
+    setModalError('')
+    setModalLoading(true)
+
     try {
-      const res = await fetch('http://localhost:8000/rooms/create', { method: 'POST' })
-      const data = await res.json()
-      router.push(`/room/${data.room_id}?username=${encodeURIComponent(username)}`)
+      if (modalMode === 'create') {
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+        const res = await fetch(`${backendUrl}/rooms/create`, { method: 'POST' })
+        const data = await res.json()
+        router.push(`/room/${data.room_id}?username=${encodeURIComponent(modalUsername)}`)
+      } else {
+        if (!joinCode.trim()) {
+          setModalError('Please enter a room code')
+          setModalLoading(false)
+          return
+        }
+        router.push(`/room/${joinCode.trim().toUpperCase()}?username=${encodeURIComponent(modalUsername)}`)
+      }
     } catch {
-      setError('Could not connect to server. Is the backend running?')
-      setLoading(false)
+      setModalError('Could not connect to server. Is the backend running?')
+      setModalLoading(false)
     }
   }
 
-  const joinRoom = async () => {
-    if (!username.trim()) return setError('Please enter your name first')
-    if (!joinCode.trim()) return setError('Please enter a room code')
-    setError('')
-    router.push(`/room/${joinCode.trim().toUpperCase()}?username=${encodeURIComponent(username)}`)
+  const closeModal = () => {
+    setModalOpen(false)
+    setModalUsername('')
+    setModalError('')
   }
 
   return (
@@ -158,7 +183,7 @@ export default function HomePage() {
                   Precision-engineered environment for real-time pair programming, architecture design, and deep technical evaluation.
                 </p>
                 <div className="flex flex-wrap gap-4 pt-4">
-                  <button onClick={createRoom} disabled={loading} className="px-8 py-4 bg-primary text-white rounded-xl font-bold shadow-xl shadow-primary/20 hover:bg-indigo-700 hover:scale-[1.02] transition-all" style={{ opacity: loading ? 0.7 : 1 }}>
+                  <button onClick={() => openNameModal('create')} disabled={loading} className="px-8 py-4 bg-primary text-white rounded-xl font-bold shadow-xl shadow-primary/20 hover:bg-indigo-700 hover:scale-[1.02] transition-all" style={{ opacity: loading ? 0.7 : 1 }}>
                     {loading ? '⏳ Creating...' : 'Start New Interview'}
                   </button>
                   <button className="px-8 py-4 bg-white border-2 border-primary/20 text-primary rounded-xl font-bold hover:bg-surface-container-low hover:border-primary transition-all">
@@ -179,10 +204,10 @@ export default function HomePage() {
                     placeholder="Enter session code (e.g. XC-921)"
                     value={joinCode}
                     onChange={e => { setJoinCode(e.target.value.toUpperCase()); setError('') }}
-                    onKeyDown={e => e.key === 'Enter' && joinRoom()}
+                    onKeyDown={e => e.key === 'Enter' && openNameModal('join')}
                     className="flex-1 bg-surface-container-low border border-slate-200 rounded-xl text-sm px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
                   />
-                  <button onClick={joinRoom} className="bg-indigo-600 text-white px-5 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/10">
+                  <button onClick={() => openNameModal('join')} className="bg-indigo-600 text-white px-5 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-600/10">
                     <span className="material-symbols-outlined text-sm font-bold">arrow_forward</span>
                   </button>
                 </div>
@@ -316,6 +341,64 @@ export default function HomePage() {
           </section>
         </div>
       </main>
+
+      {/* ═══ NAME INPUT MODAL ═══ */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4 space-y-6 border border-primary/20">
+            {/* Header */}
+            <div className="space-y-2">
+              <h2 className="text-2xl font-extrabold text-primary">
+                {modalMode === 'create' ? 'Create New Interview' : 'Join Interview'}
+              </h2>
+              <p className="text-sm text-on-surface-variant">
+                {modalMode === 'create'
+                  ? 'Enter your name to start a new interview session'
+                  : 'Enter your name to join the interview'}
+              </p>
+            </div>
+
+            {/* Error Message */}
+            {modalError && (
+              <div className="bg-error-container/20 border border-error-container rounded-lg p-3">
+                <p className="text-sm text-red-700 font-medium">{modalError}</p>
+              </div>
+            )}
+
+            {/* Name Input */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-widest text-on-surface-variant">Your Name</label>
+              <input
+                type="text"
+                placeholder="e.g. John Doe"
+                value={modalUsername}
+                onChange={e => { setModalUsername(e.target.value); setModalError('') }}
+                onKeyDown={e => e.key === 'Enter' && handleModalSubmit()}
+                autoFocus
+                className="w-full bg-surface-container-low border border-slate-200 rounded-xl text-sm px-4 py-3 focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all outline-none"
+              />
+            </div>
+
+            {/* Buttons */}
+            <div className="flex gap-3 pt-4">
+              <button
+                onClick={closeModal}
+                disabled={modalLoading}
+                className="flex-1 px-4 py-3 bg-surface-container-low text-on-surface rounded-xl font-bold hover:bg-surface-container-high transition-all disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleModalSubmit}
+                disabled={modalLoading || !modalUsername.trim()}
+                className="flex-1 px-4 py-3 bg-primary text-white rounded-xl font-bold hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {modalLoading ? '⏳ Loading...' : 'Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
