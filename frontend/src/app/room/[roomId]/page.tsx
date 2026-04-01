@@ -382,9 +382,7 @@ export default function RoomPage() {
                 formatOnPaste: true,
                 formatOnType: true,
                 padding: { top: 16, bottom: 16 },
-                fontFamily: 'Fira Code, monospace',
-                background: '#0b1326',
-              }}
+              } as any}
             />
           </div>
 
