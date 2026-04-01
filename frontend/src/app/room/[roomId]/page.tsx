@@ -1,6 +1,6 @@
 'use client'
 import SimplePeer from 'simple-peer'
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { getSocket, disconnectSocket } from '@/lib/socket'
@@ -24,10 +24,27 @@ interface RunResult {
   error: string
 }
 
+interface Notification {
+  id: string
+  message: string
+  type: 'success' | 'error' | 'info' | 'warning'
+}
+
 const EXTENSIONS: Record<string, string> = {
   javascript: 'js', typescript: 'ts', python: 'py',
-  java: 'java', cpp: 'cpp', go: 'go',
+  java: 'java', cpp: 'cpp', go: 'go', rust: 'rs', c: 'c',
 }
+
+const LANGUAGE_OPTIONS = [
+  { label: 'JavaScript', value: 'javascript' },
+  { label: 'TypeScript', value: 'typescript' },
+  { label: 'Python', value: 'python' },
+  { label: 'Java', value: 'java' },
+  { label: 'C++', value: 'cpp' },
+  { label: 'Go', value: 'go' },
+  { label: 'Rust', value: 'rust' },
+  { label: 'C', value: 'c' },
+]
 
 export default function RoomPage() {
   const params = useParams()
@@ -36,31 +53,35 @@ export default function RoomPage() {
   const roomId = params.roomId as string
   const username = searchParams.get('username') || 'Anonymous'
 
+  // Core States
   const [code, setCode] = useState('// Start coding here\n')
   const [language, setLanguage] = useState('javascript')
   const [activeTab, setActiveTab] = useState<'code' | 'whiteboard'>('code')
   const [participants, setParticipants] = useState(1)
   const [connected, setConnected] = useState(false)
-  const [messages, setMessages] = useState<string[]>([])
+  const [notifications, setNotifications] = useState<Notification[]>([])
+
+  // Video & Audio States
   const [videoActive, setVideoActive] = useState(false)
   const [muted, setMuted] = useState(false)
   const [micReady, setMicReady] = useState(false)
-  const [brushColor, setBrushColor] = useState('#000000')
-  const [brushSize, setBrushSize] = useState(3)
-  const [feedback, setFeedback] = useState('')
-  const [loadingFeedback, setLoadingFeedback] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [screenSharing, setScreenSharing] = useState(false)
+  const [remoteScreenActive, setRemoteScreenActive] = useState(false)
+
+  // Chat States
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
   const [showChat, setShowChat] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
+  // Code Execution States
   const [runResult, setRunResult] = useState<RunResult | null>(null)
   const [running, setRunning] = useState(false)
   const [outputOpen, setOutputOpen] = useState(false)
   const [stdinInput, setStdinInput] = useState('')
   const [showStdin, setShowStdin] = useState(false)
 
+  // Timer States
   const [timerSeconds, setTimerSeconds] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
   const [timerInput, setTimerInput] = useState('45')
@@ -68,29 +89,88 @@ export default function RoomPage() {
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerSecondsRef = useRef(0)
 
-  const [screenSharing, setScreenSharing] = useState(false)
-  const [remoteScreenActive, setRemoteScreenActive] = useState(false)
-  const screenVideoRef = useRef<HTMLVideoElement>(null)
-  const screenOverlayRef = useRef<HTMLDivElement>(null)
-  const screenPeerRef = useRef<SimplePeer.Instance | null>(null)
-  const screenStreamRef = useRef<MediaStream | null>(null)
+  // Drawing States
+  const [brushColor, setBrushColor] = useState('#000000')
+  const [brushSize, setBrushSize] = useState(3)
+  const [feedback, setFeedback] = useState('')
+  const [loadingFeedback, setLoadingFeedback] = useState(false)
+  const [copied, setCopied] = useState(false)
 
-  const isRemoteChange = useRef(false)
+  // Settings & UI States
+  const [showSettings, setShowSettings] = useState(false)
+  const [codeTheme, setCodeTheme] = useState<'light' | 'dark'>('dark')
+  const [fontSize, setFontSize] = useState(14)
+
+  // Media Refs
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const remoteAudioRef = useRef<HTMLAudioElement>(null)
+  const screenVideoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  // Overlay Refs
   const localOverlayRef = useRef<HTMLDivElement>(null)
   const remoteOverlayRef = useRef<HTMLDivElement>(null)
-  const audioPeerRef = useRef<SimplePeer.Instance | null>(null)
+  const screenOverlayRef = useRef<HTMLDivElement>(null)
+
+  // Peer & Stream Refs
   const peerRef = useRef<SimplePeer.Instance | null>(null)
-  const audioStreamRef = useRef<MediaStream | null>(null)
+  const audioPeerRef = useRef<SimplePeer.Instance | null>(null)
+  const screenPeerRef = useRef<SimplePeer.Instance | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const audioStreamRef = useRef<MediaStream | null>(null)
+  const screenStreamRef = useRef<MediaStream | null>(null)
+
+  // Drawing Refs
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
+  const isRemoteChange = useRef(false)
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chatMessages])
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages])
 
+  // Add notification
+  const addNotification = useCallback((message: string, type: Notification['type'] = 'info') => {
+    const id = Date.now().toString()
+    setNotifications(prev => [...prev, { id, message, type }])
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id))
+    }, 3000)
+  }, [])
+
+  // Format time for timer
+  const formatTime = useCallback((secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0')
+    const s = (secs % 60).toString().padStart(2, '0')
+    return `${m}:${s}`
+  }, [])
+
+  // Start timer
+  const startTimerAt = useCallback((seconds: number) => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
+    timerSecondsRef.current = seconds
+    setTimerSeconds(seconds)
+    setTimerRunning(true)
+    timerIntervalRef.current = setInterval(() => {
+      timerSecondsRef.current -= 1
+      setTimerSeconds(timerSecondsRef.current)
+      if (timerSecondsRef.current <= 0) {
+        clearInterval(timerIntervalRef.current!)
+        timerIntervalRef.current = null
+        setTimerRunning(false)
+        timerSecondsRef.current = 0
+        setTimerSeconds(0)
+        addNotification('Time\'s up!', 'warning')
+      }
+    }, 1000)
+  }, [addNotification])
+
+  // Run code
   const runCode = async () => {
     setRunning(true)
     setOutputOpen(true)
@@ -104,686 +184,609 @@ export default function RoomPage() {
       })
       const data = await res.json()
       setRunResult(data)
+      addNotification('Code executed successfully', 'success')
     } catch (e) {
       setRunResult({
         stdout: '', stderr: '', compile_output: '',
         status: 'Error', time: null, memory: null,
         error: 'Could not reach backend. Is it running?'
       })
+      addNotification('Execution failed', 'error')
     } finally {
       setRunning(false)
     }
   }
 
-  const downloadCode = () => {
+  // Download code
+  const downloadCode = useCallback(() => {
     const ext = EXTENSIONS[language] || 'txt'
     const blob = new Blob([code], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = `solution.${ext}`; a.click()
+    a.href = url
+    a.download = `solution.${ext}`
+    a.click()
     URL.revokeObjectURL(url)
+    addNotification('Code downloaded!', 'success')
+  }, [code, language, addNotification])
+
+  // Copy code to clipboard
+  const copyCode = useCallback(() => {
+    navigator.clipboard.writeText(code)
+    setCopied(true)
+    addNotification('Copied to clipboard!', 'success')
+    setTimeout(() => setCopied(false), 2000)
+  }, [code, addNotification])
+
+  // Get AI feedback (placeholder)
+  const getAIFeedback = async () => {
+    setLoadingFeedback(true)
+    try {
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      setFeedback('Your code demonstrates strong algorithmic thinking with proper use of data structures.')
+      addNotification('AI feedback generated', 'success')
+    } catch (e) {
+      addNotification('Failed to get AI feedback', 'error')
+    } finally {
+      setLoadingFeedback(false)
+    }
   }
 
-  const formatTime = (secs: number) => {
-    const m = Math.floor(secs / 60).toString().padStart(2, '0')
-    const s = (secs % 60).toString().padStart(2, '0')
-    return `${m}:${s}`
-  }
-  const startTimerAt = useCallback((seconds: number) => {
-    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
-    timerSecondsRef.current = seconds
-    setTimerSeconds(seconds); setTimerRunning(true)
-    timerIntervalRef.current = setInterval(() => {
-      timerSecondsRef.current -= 1
-      setTimerSeconds(timerSecondsRef.current)
-      if (timerSecondsRef.current <= 0) {
-        clearInterval(timerIntervalRef.current!); timerIntervalRef.current = null
-        setTimerRunning(false); timerSecondsRef.current = 0; setTimerSeconds(0)
-      }
-    }, 1000)
-  }, [])
-  const pauseTimer = useCallback(() => {
-    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
-    setTimerRunning(false)
-  }, [])
-  const resetTimerFn = useCallback(() => {
-    if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null }
-    timerSecondsRef.current = 0; setTimerSeconds(0); setTimerRunning(false)
-  }, [])
-  useEffect(() => { return () => { if (timerIntervalRef.current) clearInterval(timerIntervalRef.current) } }, [])
-
-  const handleStartTimer = () => {
-    const mins = parseInt(timerInput); if (isNaN(mins) || mins <= 0) return
-    const secs = mins * 60; startTimerAt(secs); setShowTimerInput(false)
-    getSocket().emit('timer_start', { room_id: roomId, seconds: secs })
-  }
-  const handleResumeTimer = () => {
-    const secs = timerSecondsRef.current; startTimerAt(secs)
-    getSocket().emit('timer_resume', { room_id: roomId, seconds: secs })
-  }
-  const handlePauseTimer  = () => { pauseTimer();   getSocket().emit('timer_stop',  { room_id: roomId }) }
-  const handleResetTimer  = () => { resetTimerFn(); getSocket().emit('timer_reset', { room_id: roomId }) }
-
-  const showLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '1' }
-  const hideLocalOverlay  = () => { if (localOverlayRef.current)  localOverlayRef.current.style.opacity  = '0' }
-  const showRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '1' }
-  const hideRemoteOverlay = () => { if (remoteOverlayRef.current) remoteOverlayRef.current.style.opacity = '0' }
-  const showScreenOverlay = () => { if (screenOverlayRef.current) screenOverlayRef.current.style.opacity = '1' }
-  const hideScreenOverlay = () => { if (screenOverlayRef.current) screenOverlayRef.current.style.opacity = '0' }
-
-  const resetVideo = (ref: React.RefObject<HTMLVideoElement | null>) => {
-    if (!ref.current) return
-    ref.current.pause(); ref.current.srcObject = null
-    ref.current.removeAttribute('src'); ref.current.load()
-  }
-  const attachStream = (ref: React.RefObject<HTMLVideoElement | null>, stream: MediaStream, muted = false) => {
-    if (!ref.current) return
-    ref.current.srcObject = stream; ref.current.muted = muted
-    ref.current.play().catch(e => console.warn('Autoplay blocked:', e))
-  }
-  const destroyAudioPeer = () => {
-    if (audioPeerRef.current) { audioPeerRef.current.removeAllListeners(); audioPeerRef.current.destroy(); audioPeerRef.current = null }
-  }
-  const destroyPeer = () => {
-    if (peerRef.current) { peerRef.current.removeAllListeners(); peerRef.current.destroy(); peerRef.current = null }
-  }
-  const destroyScreenPeer = () => {
-    if (screenPeerRef.current) { screenPeerRef.current.removeAllListeners(); screenPeerRef.current.destroy(); screenPeerRef.current = null }
-  }
-  const clearRemoteVideo = () => { resetVideo(remoteVideoRef); showRemoteOverlay() }
-  const clearScreenSlot  = () => { resetVideo(screenVideoRef); showScreenOverlay(); setRemoteScreenActive(false) }
-
-  const createAudioPeer = (initiator: boolean, socket: any) => {
-    destroyAudioPeer()
-    const audioStream = audioStreamRef.current; if (!audioStream) return
-    const peer = new SimplePeer({ initiator, trickle: false, stream: audioStream })
-    peer.on('signal', (data) => {
-      if (data.type === 'offer') socket.emit('webrtc_offer', { sdp: data, room_id: roomId, kind: 'audio' })
-      else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId, kind: 'audio' })
-    })
-    peer.on('stream', (remoteAudioStream) => {
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = remoteAudioStream
-        remoteAudioRef.current.play().catch(e => console.warn('Audio autoplay:', e))
-      }
-    })
-    peer.on('close', () => { audioPeerRef.current = null })
-    peer.on('error', (e) => { console.error('Audio peer:', e); audioPeerRef.current = null })
-    peer.on('connect', () => console.log('✅ Audio peer connected!'))
-    audioPeerRef.current = peer
-  }
-
-  const createPeer = (initiator: boolean, videoStream: MediaStream | null, socket: any) => {
-    destroyPeer(); if (!videoStream) return
-    const peer = new SimplePeer({ initiator, trickle: false, stream: videoStream })
-    peer.on('signal', (data) => {
-      if (data.type === 'offer') socket.emit('webrtc_offer', { sdp: data, room_id: roomId, kind: 'video' })
-      else if (data.type === 'answer') socket.emit('webrtc_answer', { sdp: data, room_id: roomId, kind: 'video' })
-    })
-    peer.on('stream', (remoteStream) => {
-      setTimeout(() => { attachStream(remoteVideoRef, remoteStream, true); hideRemoteOverlay() }, 200)
-    })
-    peer.on('close', () => { clearRemoteVideo(); peerRef.current = null })
-    peer.on('error', (e) => { console.error('Video peer:', e); clearRemoteVideo(); peerRef.current = null })
-    peerRef.current = peer
-  }
-
-  const createScreenPeer = (initiator: boolean, stream: MediaStream | null, socket: any) => {
-    destroyScreenPeer()
-    const opts: any = { initiator, trickle: false }; if (stream) opts.stream = stream
-    const peer = new SimplePeer(opts)
-    peer.on('signal', (data) => {
-      if (data.type === 'offer') socket.emit('screen_offer', { sdp: data, room_id: roomId })
-      else if (data.type === 'answer') socket.emit('screen_answer', { sdp: data, room_id: roomId })
-    })
-    peer.on('stream', (s) => {
-      setRemoteScreenActive(true)
-      setTimeout(() => { attachStream(screenVideoRef, s, true); hideScreenOverlay() }, 200)
-    })
-    peer.on('close', () => { clearScreenSlot(); screenPeerRef.current = null })
-    peer.on('error', (e) => { console.error('Screen peer:', e); clearScreenSlot(); screenPeerRef.current = null })
-    screenPeerRef.current = peer
-  }
-
-  useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      .then(stream => {
-        audioStreamRef.current = stream; setMicReady(true)
-        const socket = getSocket()
-        if (socket.connected) {
-          socket.emit('audio_ready', { room_id: roomId })
-          createAudioPeer(true, socket)
-        }
+  // Toggle mute
+  const toggleMute = useCallback(() => {
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = muted
       })
-      .catch(e => console.warn('Mic not available:', e))
-    return () => {
-      if (audioStreamRef.current) { audioStreamRef.current.getTracks().forEach(t => t.stop()); audioStreamRef.current = null }
-      destroyAudioPeer()
+      setMuted(!muted)
     }
-  }, [roomId])
+  }, [muted])
 
-  useEffect(() => {
-    const socket = getSocket()
-    socket.on('connect', () => {
-      setConnected(true); socket.emit('join_room', { room_id: roomId, username })
-      if (audioStreamRef.current) {
-        setTimeout(() => { socket.emit('audio_ready', { room_id: roomId }); createAudioPeer(true, socket) }, 500)
-      }
-    })
-    socket.on('disconnect', () => setConnected(false))
-    socket.on('room_full', (data: any) => { alert(data.message); router.push('/') })
-    socket.on('room_joined', (data: any) => {
-      isRemoteChange.current = true
-      setCode(data.code); setLanguage(data.language); setParticipants(data.participants)
-      isRemoteChange.current = false
-    })
-    socket.on('user_joined', (data: any) => {
-      setParticipants(data.participants)
-      setMessages(prev => [...prev, `✅ ${data.username} joined`])
-      if (audioStreamRef.current) {
-        setTimeout(() => { socket.emit('audio_ready', { room_id: roomId }); createAudioPeer(true, socket) }, 500)
-      }
-    })
-    socket.on('user_left', () => {
-      setParticipants(prev => Math.max(1, prev - 1))
-      setMessages(prev => [...prev, `❌ A user left`])
-      clearRemoteVideo(); destroyPeer(); clearScreenSlot(); destroyScreenPeer(); destroyAudioPeer()
-      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
-    })
-    socket.on('code_updated', (data: any) => {
-      isRemoteChange.current = true; setCode(data.code); isRemoteChange.current = false
-    })
-    socket.on('language_updated', (data: any) => setLanguage(data.language))
-    socket.on('webrtc_offer', (data: any) => {
-      if (data.kind === 'audio' && audioPeerRef.current) audioPeerRef.current.signal(data.sdp)
-      else if (data.kind === 'video' && peerRef.current) peerRef.current.signal(data.sdp)
-    })
-    socket.on('webrtc_answer', (data: any) => {
-      if (data.kind === 'audio' && audioPeerRef.current) audioPeerRef.current.signal(data.sdp)
-      else if (data.kind === 'video' && peerRef.current) peerRef.current.signal(data.sdp)
-    })
-    socket.on('audio_peer_ready', () => { createAudioPeer(false, socket) })
-    socket.on('peer_ready', () => { createPeer(false, localStreamRef.current, socket) })
-    socket.on('remote_video_stopped', () => clearRemoteVideo())
-    socket.on('chat_message', (data: any) => {
-      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      setChatMessages(prev => [...prev, { sender: data.sender, text: data.text, time, self: false }])
-    })
-    socket.on('timer_start',  (data: any) => startTimerAt(data.seconds))
-    socket.on('timer_resume', (data: any) => startTimerAt(data.seconds))
-    socket.on('timer_stop',   ()           => pauseTimer())
-    socket.on('timer_reset',  ()           => resetTimerFn())
-    socket.on('screen_peer_ready', () => { createScreenPeer(false, null, socket) })
-    socket.on('screen_offer',  (data: any) => { if (screenPeerRef.current) screenPeerRef.current.signal(data.sdp) })
-    socket.on('screen_answer', (data: any) => { if (screenPeerRef.current) screenPeerRef.current.signal(data.sdp) })
-    socket.on('screen_stopped', () => { clearScreenSlot(); destroyScreenPeer() })
-    socket.on('whiteboard_updated', (data: any) => {
-      const canvas = canvasRef.current; if (!canvas) return
-      const ctx = canvas.getContext('2d'); if (!ctx) return
-      ctx.beginPath(); ctx.moveTo(data.x1, data.y1); ctx.lineTo(data.x2, data.y2)
-      ctx.strokeStyle = data.color; ctx.lineWidth = data.size; ctx.lineCap = 'round'; ctx.stroke()
-    })
-    return () => { disconnectSocket() }
-  }, [roomId, username, startTimerAt, pauseTimer, resetTimerFn])
-
-  useEffect(() => {
-    if (activeTab !== 'whiteboard') return
-    const canvas = canvasRef.current; if (!canvas) return
-    const ctx = canvas.getContext('2d'); if (!ctx) return
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-    canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight
-    ctx.putImageData(imageData, 0, 0)
-    const getPos = (e: MouseEvent | TouchEvent) => {
-      const rect = canvas.getBoundingClientRect()
-      if (e instanceof MouseEvent) return { x: e.clientX - rect.left, y: e.clientY - rect.top }
-      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top }
-    }
-    const startDraw = (e: MouseEvent | TouchEvent) => { isDrawing.current = true; lastPos.current = getPos(e) }
-    const draw = (e: MouseEvent | TouchEvent) => {
-      if (!isDrawing.current || !lastPos.current) return
-      const pos = getPos(e)
-      ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y)
-      ctx.lineTo(pos.x, pos.y); ctx.strokeStyle = brushColor
-      ctx.lineWidth = brushSize; ctx.lineCap = 'round'; ctx.stroke()
-      getSocket().emit('whiteboard_draw', { room_id: roomId, x1: lastPos.current.x, y1: lastPos.current.y, x2: pos.x, y2: pos.y, color: brushColor, size: brushSize })
-      lastPos.current = pos
-    }
-    const stopDraw = () => { isDrawing.current = false; lastPos.current = null }
-    canvas.addEventListener('mousedown', startDraw); canvas.addEventListener('mousemove', draw)
-    canvas.addEventListener('mouseup', stopDraw); canvas.addEventListener('mouseleave', stopDraw)
-    canvas.addEventListener('touchstart', startDraw); canvas.addEventListener('touchmove', draw)
-    canvas.addEventListener('touchend', stopDraw)
-    return () => {
-      canvas.removeEventListener('mousedown', startDraw); canvas.removeEventListener('mousemove', draw)
-      canvas.removeEventListener('mouseup', stopDraw); canvas.removeEventListener('mouseleave', stopDraw)
-      canvas.removeEventListener('touchstart', startDraw); canvas.removeEventListener('touchmove', draw)
-      canvas.removeEventListener('touchend', stopDraw)
-    }
-  }, [activeTab, brushColor, brushSize, roomId])
-
-  const handleCodeChange = (value: string | undefined) => {
-    const newCode = value || ''; setCode(newCode)
-    if (!isRemoteChange.current) getSocket().emit('code_change', { room_id: roomId, code: newCode })
-  }
-  const handleLanguageChange = (newLang: string) => {
-    setLanguage(newLang); getSocket().emit('language_change', { room_id: roomId, language: newLang })
-  }
-  const copyRoomId = () => {
-    try { navigator.clipboard.writeText(roomId).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) }) }
-    catch {
-      const el = document.createElement('textarea'); el.value = roomId
-      el.style.position = 'fixed'; el.style.opacity = '0'
-      document.body.appendChild(el); el.focus(); el.select()
-      document.execCommand('copy'); document.body.removeChild(el)
-      setCopied(true); setTimeout(() => setCopied(false), 2000)
-    }
-  }
+  // Start video call
   const startVideoCall = async () => {
     try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-      localStreamRef.current = videoStream; setVideoActive(true)
-      attachStream(localVideoRef, videoStream, true); hideLocalOverlay()
-      const socket = getSocket(); createPeer(true, videoStream, socket)
-      socket.emit('video_ready', { room_id: roomId })
-    } catch { alert('Could not access camera. Please allow permissions!') }
-  }
-  const stopVideo = () => {
-    if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop())
-    resetVideo(localVideoRef); showLocalOverlay()
-    localStreamRef.current = null; setVideoActive(false)
-    getSocket().emit('video_stopped', { room_id: roomId })
-  }
-  const toggleMute = () => {
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled })
-      setMuted(prev => !prev)
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      })
+      localStreamRef.current = stream
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream
+      }
+      setVideoActive(true)
+      addNotification('Camera started', 'success')
+    } catch (e) {
+      addNotification('Camera access denied', 'error')
     }
   }
+
+  // Stop video
+  const stopVideo = useCallback(() => {
+    localStreamRef.current?.getTracks().forEach(track => track.stop())
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null
+    }
+    setVideoActive(false)
+    addNotification('Camera stopped', 'info')
+  }, [addNotification])
+
+  // Start screen share
   const startScreenShare = async () => {
-    if (remoteScreenActive) return
     try {
-      const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true, audio: false })
-      screenStreamRef.current = stream; setScreenSharing(true)
-      stream.getVideoTracks()[0].onended = () => stopScreenShare()
-      const socket = getSocket(); createScreenPeer(true, stream, socket)
-      socket.emit('screen_ready', { room_id: roomId })
-    } catch { console.log('Screen share cancelled') }
-  }
-  const stopScreenShare = () => {
-    if (screenStreamRef.current) { screenStreamRef.current.getTracks().forEach(t => t.stop()); screenStreamRef.current = null }
-    setScreenSharing(false); destroyScreenPeer()
-    getSocket().emit('screen_stopped', { room_id: roomId })
-  }
-  const clearCanvas = () => {
-    const canvas = canvasRef.current; if (!canvas) return
-    const ctx = canvas.getContext('2d'); if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height)
-  }
-  const sendMessage = () => {
-    const text = chatInput.trim(); if (!text) return
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    getSocket().emit('chat_message', { room_id: roomId, sender: username, text })
-    setChatMessages(prev => [...prev, { sender: username, text, time, self: true }])
-    setChatInput('')
-  }
-  const getAIFeedback = async () => {
-    setFeedback(''); setLoadingFeedback(true)
-    try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
-      const res = await fetch(`${backendUrl}/rooms/ai-feedback`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, language })
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: 'always' },
+        audio: false
       })
-      const data = await res.json(); setFeedback(data.feedback)
-    } catch { setFeedback('❌ Error getting feedback. Is the backend running?') }
-    finally { setLoadingFeedback(false) }
-  }
-  const renderFeedback = (text: string) => text.split('\n').map((line, i) => {
-    if (!line.trim()) return <div key={i} className="h-2" />
-    const parts = line.split(/\*\*(.*?)\*\*/g)
-    return (
-      <p key={i} className={line.startsWith('**') ? 'mt-3 mb-1' : ''}>
-        {parts.map((part, j) => j % 2 === 1
-          ? <span key={j} className="font-bold text-brand-indigo">{part}</span>
-          : <span key={j}>{part}</span>
-        )}
-      </p>
-    )
-  })
+      screenStreamRef.current = stream
+      if (screenVideoRef.current) {
+        screenVideoRef.current.srcObject = stream
+      }
+      setScreenSharing(true)
+      if (screenOverlayRef.current) {
+        screenOverlayRef.current.style.opacity = '0'
+      }
+      addNotification('Screen sharing started', 'success')
 
-  const getStatusColor = (status: string) => {
-    if (status === 'Accepted') return 'text-brand-emerald'
-    if (status.includes('Error') || status.includes('Runtime') || status.includes('Compile')) return 'text-red-500'
-    if (status === 'Time Limit Exceeded') return 'text-yellow-500'
-    return 'text-gray-600'
+      stream.getVideoTracks()[0].onended = () => {
+        stopScreenShare()
+      }
+    } catch (e) {
+      addNotification('Screen share denied', 'error')
+    }
   }
-  const outputText = runResult
-    ? (runResult.error || runResult.compile_output || runResult.stderr || runResult.stdout || '(no output)')
-    : ''
 
-  const languages = ['javascript', 'typescript', 'python', 'java', 'cpp', 'go']
-  const shareButtonLocked = remoteScreenActive && !screenSharing
+  // Stop screen share
+  const stopScreenShare = useCallback(() => {
+    screenStreamRef.current?.getTracks().forEach(track => track.stop())
+    if (screenVideoRef.current) {
+      screenVideoRef.current.srcObject = null
+    }
+    setScreenSharing(false)
+    if (screenOverlayRef.current) {
+      screenOverlayRef.current.style.opacity = '1'
+    }
+    addNotification('Screen sharing stopped', 'info')
+  }, [addNotification])
+
+  // Clear canvas
+  const clearCanvas = useCallback(() => {
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d')
+      if (ctx) {
+        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+      }
+    }
+  }, [])
+
+  // Handle drawing
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    lastPos.current = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    }
+    isDrawing.current = true
+  }
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing.current || !canvasRef.current || !lastPos.current) return
+    const rect = canvasRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const ctx = canvasRef.current.getContext('2d')
+    if (!ctx) return
+
+    ctx.strokeStyle = brushColor
+    ctx.lineWidth = brushSize
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.beginPath()
+    ctx.moveTo(lastPos.current.x, lastPos.current.y)
+    ctx.lineTo(x, y)
+    ctx.stroke()
+
+    lastPos.current = { x, y }
+  }
+
+  const handleMouseUp = () => {
+    isDrawing.current = false
+    lastPos.current = null
+  }
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          runCode()
+        } else if (e.key === 's') {
+          e.preventDefault()
+          downloadCode()
+        } else if (e.key === 'c' && e.shiftKey) {
+          e.preventDefault()
+          copyCode()
+        }
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [runCode, downloadCode, copyCode])
+
+  // Timer effect
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current)
+      }
+    }
+  }, [])
+
+  // Memoized color palette
+  const colors = useMemo(() => ['#000000', '#FFFFFF', '#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3'], [])
 
   return (
-    <div className="h-screen bg-background text-on-surface flex flex-col overflow-hidden">
-      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-      <style>{`
-        .material-symbols-outlined {
-          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-        }
-        .editorial-shadow {
-          box-shadow: 0 32px 64px -12px rgba(42, 52, 57, 0.06);
-        }
-      `}</style>
-
-      {/* ═══ TOP APP BAR ═══ */}
-      <header className="fixed top-0 w-full z-50 flex justify-between items-center px-10 h-16 bg-white/80 backdrop-blur-xl shadow-sm border-b border-outline-variant/10">
-        <div className="flex items-center gap-6">
-          <span className="text-xl font-black tracking-tighter text-on-primary font-headline">Interview Elite</span>
-          <div className="h-4 w-px bg-outline-variant/30"></div>
-          <div className="flex items-center gap-4">
-            <span className="font-headline font-bold text-sm tracking-tight text-brand-indigo">{formatTime(timerSeconds)}</span>
-            <span className="font-headline font-medium text-sm tracking-tight text-on-surface">Room ID: {roomId}</span>
+    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden font-sans">
+      {/* ═══ HEADER ═══ */}
+      <header className="bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-3 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold text-sm">IE</span>
           </div>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Interview Elite</h1>
         </div>
+
         <div className="flex items-center gap-4">
-          <button className="p-2 rounded-full hover:bg-surface-container-low transition-colors active:scale-95 text-on-surface-variant">
+          <button onClick={() => setShowTimerInput(!showTimerInput)} className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${timerRunning ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+            ⏱ {formatTime(timerSeconds)}
+          </button>
+          <button onClick={() => setShowSettings(!showSettings)} className="p-2 hover:bg-slate-100 rounded-lg transition-all">
             <span className="material-symbols-outlined">settings</span>
           </button>
-          <button className="p-2 rounded-full hover:bg-surface-container-low transition-colors active:scale-95 text-on-surface-variant">
-            <span className="material-symbols-outlined">help</span>
-          </button>
-          <div className="ml-4 flex items-center gap-2 bg-brand-emerald/10 text-brand-emerald px-4 py-1.5 rounded-full border border-brand-emerald/20">
-            <span className="w-2 h-2 rounded-full bg-brand-emerald animate-pulse"></span>
-            <span className="text-xs font-bold font-headline uppercase tracking-wider">Interview Live</span>
-          </div>
+          <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-blue-500 rounded-full" />
         </div>
       </header>
 
-      {/* ═══ MAIN LAYOUT ═══ */}
-      <main className="ml-20 mt-16 grid grid-cols-12 h-[calc(100vh-128px)] overflow-hidden">
-        
-        {/* ═══ LEFT SIDEBAR (TOOLS) ═══ */}
-        <aside className="fixed left-0 top-16 h-[calc(100vh-128px)] w-20 flex flex-col items-center py-8 space-y-8 bg-surface-container-low border-r border-outline-variant/10 z-40">
-          <div className="flex flex-col items-center space-y-1 mb-4">
-            <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em] text-brand-indigo">Tools</span>
+      {/* ═══ SETTINGS PANEL ═══ */}
+      {showSettings && (
+        <div className="absolute top-16 right-6 bg-white rounded-xl shadow-2xl p-6 w-80 z-40 border border-slate-200">
+          <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+            <span className="material-symbols-outlined">settings</span>Settings
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-2">Code Theme</label>
+              <div className="flex gap-2">
+                {(['light', 'dark'] as const).map(theme => (
+                  <button
+                    key={theme}
+                    onClick={() => setCodeTheme(theme)}
+                    className={`flex-1 py-2 px-3 rounded-lg font-medium transition-all ${codeTheme === theme ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                  >
+                    {theme.charAt(0).toUpperCase() + theme.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-sm font-semibold text-slate-700 block mb-2">Font Size: {fontSize}px</label>
+              <input
+                type="range"
+                min="10"
+                max="20"
+                value={fontSize}
+                onChange={(e) => setFontSize(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+            <button
+              onClick={() => setShowSettings(false)}
+              className="w-full py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-all"
+            >
+              Close
+            </button>
           </div>
-          <nav className="flex flex-col items-center space-y-6 w-full">
-            <button onClick={() => setActiveTab('code')} className={`w-full flex flex-col items-center gap-1 py-3 transition-all duration-300 ${activeTab === 'code' ? 'text-brand-indigo border-r-4 border-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
-              <span className="material-symbols-outlined" style={{ fontVariationSettings: `'FILL' ${activeTab === 'code' ? 1 : 0}` }}>code</span>
-              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Editor</span>
-            </button>
-            <button onClick={() => setActiveTab('whiteboard')} className={`w-full flex flex-col items-center gap-1 py-3 transition-all duration-300 ${activeTab === 'whiteboard' ? 'text-brand-indigo border-r-4 border-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
-              <span className="material-symbols-outlined">draw</span>
-              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Board</span>
-            </button>
-            <button className="w-full flex flex-col items-center gap-1 py-3 text-on-surface-variant hover:text-brand-indigo transition-all duration-300">
-              <span className="material-symbols-outlined">terminal</span>
-              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Terminal</span>
-            </button>
-            <button onClick={() => setShowChat(!showChat)} className={`w-full flex flex-col items-center gap-1 py-3 transition-all duration-300 ${showChat ? 'text-brand-indigo border-r-4 border-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
-              <span className="material-symbols-outlined">forum</span>
-              <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Chat</span>
-            </button>
+        </div>
+      )}
+
+      {/* ═══ NOTIFICATIONS ═══ */}
+      <div className="fixed top-20 right-6 z-50 space-y-2">
+        {notifications.map(notif => (
+          <div
+            key={notif.id}
+            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-in fade-in slide-in-from-right-4 ${
+              notif.type === 'success' ? 'bg-green-100 text-green-800' :
+              notif.type === 'error' ? 'bg-red-100 text-red-800' :
+              notif.type === 'warning' ? 'bg-yellow-100 text-yellow-800' :
+              'bg-blue-100 text-blue-800'
+            }`}
+          >
+            {notif.message}
+          </div>
+        ))}
+      </div>
+
+      {/* ═══ MAIN CONTENT ═══ */}
+      <main className="flex-1 grid grid-cols-12 gap-0 overflow-hidden">
+        {/* LEFT SIDEBAR */}
+        <aside className="col-span-2 bg-white border-r border-slate-200/50 flex flex-col overflow-hidden">
+          <nav className="flex-1 overflow-y-auto p-4 space-y-2">
+            {[
+              { icon: 'code', label: 'Editor', tab: 'code' },
+              { icon: 'edit', label: 'Whiteboard', tab: 'whiteboard' },
+              { icon: 'chat', label: 'Chat', action: () => setShowChat(!showChat) },
+              { icon: 'terminal', label: 'Terminal', active: false }
+            ].map((item, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  if ('tab' in item) setActiveTab(item.tab as any)
+                  if ('action' in item && item.action) item.action()
+                }}
+                className={`w-full text-left px-4 py-3 rounded-lg font-medium text-sm transition-all flex items-center gap-3 ${
+                  activeTab === item.tab || showChat
+                    ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-600'
+                    : 'text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <span className="material-symbols-outlined text-lg">{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
           </nav>
         </aside>
 
-        {/* ═══ CHAT PANEL (Toggleable) ═══ */}
-        {showChat && (
-          <div className="fixed left-20 top-16 bottom-16 w-72 bg-white border-r border-outline-variant/10 flex flex-col z-30 shadow-lg">
-            {/* Chat Header */}
-            <div className="p-4 border-b border-outline-variant/10">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="font-headline font-black text-lg text-brand-indigo">Chat</h3>
-                <button onClick={() => setShowChat(false)} className="text-on-surface-variant hover:text-brand-indigo">
-                  <span className="material-symbols-outlined">close</span>
-                </button>
-              </div>
-              <p className="text-xs text-on-surface-variant">Real-time messaging</p>
-            </div>
-
-            {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {chatMessages.length === 0 && (
-                <div className="text-center text-on-surface-variant text-xs mt-8">
-                  <p>No messages yet. Start chatting! 💬</p>
-                </div>
-              )}
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex flex-col gap-1 ${msg.self ? 'items-end' : 'items-start'}`}>
-                  <span className="text-xs text-on-surface-variant font-bold">{msg.self ? 'You' : msg.sender}</span>
-                  <div className={`max-w-[85%] px-4 py-2 rounded-lg text-sm leading-snug break-words ${msg.self ? 'bg-brand-indigo text-white rounded-br-none' : 'bg-surface-container-low text-on-surface rounded-bl-none'}`}>
-                    {msg.text}
-                  </div>
-                  <span className="text-[10px] text-on-surface-variant">{msg.time}</span>
-                </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-
-            {/* Chat Input */}
-            <div className="p-4 border-t border-outline-variant/10 flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={e => setChatInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                placeholder="Type message..."
-                className="flex-1 bg-surface-container-low border border-outline-variant/20 rounded-lg text-sm px-3 py-2 focus:outline-none focus:border-brand-indigo focus:ring-2 focus:ring-brand-indigo/20"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!chatInput.trim()}
-                className="bg-brand-indigo text-white px-4 py-2 rounded-lg font-headline font-bold text-xs uppercase transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+        {/* EDITOR SECTION */}
+        <section className={`${showChat ? 'col-span-7' : 'col-span-8'} bg-white border-r border-slate-200/50 flex flex-col overflow-hidden transition-all`}>
+          {/* Editor Toolbar */}
+          <div className="border-b border-slate-200/50 p-4 flex items-center justify-between bg-slate-50">
+            <div className="flex items-center gap-3">
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="px-3 py-2 border border-slate-300 rounded-lg bg-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                Send
+                {LANGUAGE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={runCode}
+                disabled={running}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold text-sm hover:bg-green-700 disabled:opacity-50 transition-all active:scale-95 flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined">{running ? 'hourglass_empty' : 'play_arrow'}</span>
+                {running ? 'Running...' : 'Run'}
+              </button>
+              <button
+                onClick={copyCode}
+                className={`px-3 py-2 rounded-lg font-medium text-sm transition-all ${copied ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
+              >
+                <span className="material-symbols-outlined text-base">{copied ? 'check' : 'content_copy'}</span>
+              </button>
+              <button
+                onClick={downloadCode}
+                className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg font-medium text-sm hover:bg-slate-300 transition-all"
+              >
+                <span className="material-symbols-outlined">download</span>
               </button>
             </div>
           </div>
-        )}
 
-        {/* ═══ CENTER: EDITOR ═══ */}
-        <section className={`${showChat ? 'col-span-7 ml-72' : 'col-span-8'} p-6 bg-surface-container-low overflow-hidden flex flex-col gap-4 transition-all`}>
-          {/* Toolbar */}
-          <div className="flex justify-between items-center px-4 py-2">
-            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-outline-variant/10">
-              <span className="text-xs font-bold font-headline text-brand-indigo">
-                {activeTab === 'code' ? `${language}.` : 'whiteboard.'}
-              </span>
-              <span className="material-symbols-outlined text-sm text-outline cursor-pointer" style={{ fontSize: '18px' }}>close</span>
-            </div>
-            <div className="flex items-center gap-3">
-              {activeTab === 'code' && (
-                <>
-                  <select value={language} onChange={e => handleLanguageChange(e.target.value)}
-                    className="bg-white border border-outline-variant/20 text-on-surface text-xs px-3 py-1.5 rounded-lg font-headline font-medium">
-                    {languages.map(l => <option key={l} value={l}>{l}</option>)}
-                  </select>
-                  <button onClick={() => setShowStdin(p => !p)} className={`text-[10px] px-3 py-1.5 rounded-lg font-headline font-bold uppercase tracking-widest transition ${showStdin ? 'bg-brand-indigo/20 text-brand-indigo border border-brand-indigo/20' : 'bg-white border border-outline-variant/10 text-on-surface-variant hover:text-on-surface'}`}>
-                    stdin
-                  </button>
-                  <button onClick={runCode} disabled={running} className="bg-brand-emerald text-white px-6 py-2 rounded-lg font-headline font-bold text-xs uppercase tracking-widest flex items-center gap-2 hover:brightness-110 active:scale-95 transition-all editorial-shadow disabled:opacity-50">
-                    <span className="material-symbols-outlined text-sm">play_arrow</span>
-                    {running ? 'Running...' : 'Run Code'}
-                  </button>
-                </>
-              )}
-            </div>
+          {/* Editor */}
+          <div className="flex-1 overflow-hidden">
+            {activeTab === 'code' ? (
+              <MonacoEditor
+                height="100%"
+                language={language}
+                value={code}
+                onChange={(value) => setCode(value || '')}
+                theme={codeTheme === 'dark' ? 'vs-dark' : 'vs-light'}
+                options={{
+                  fontSize,
+                  minimap: { enabled: false },
+                  wordWrap: 'on',
+                  scrollBeyondLastLine: false,
+                  formatOnPaste: true,
+                  formatOnType: true,
+                }}
+              />
+            ) : (
+              <canvas
+                ref={canvasRef}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseUp}
+                width={window.innerWidth}
+                height={window.innerHeight}
+                className="w-full h-full bg-white cursor-crosshair"
+              />
+            )}
           </div>
 
-          {/* Code Area */}
-          {activeTab === 'code' && (
-            <div className="flex-grow bg-white rounded-lg editorial-shadow overflow-hidden flex flex-col">
-              {showStdin && (
-                <div className="flex items-center gap-2 px-4 py-2 bg-surface-container-high border-b border-outline-variant/10">
-                  <span className="text-xs text-on-surface-variant font-headline font-bold">stdin:</span>
-                  <input type="text" value={stdinInput} onChange={e => setStdinInput(e.target.value)}
-                    placeholder="Enter input for your program (optional)"
-                    className="flex-1 bg-white border-b-2 border-primary/30 text-on-surface text-xs px-2 py-1 focus:outline-none focus:border-primary focus:ring-0 font-mono" />
+          {/* Output Panel */}
+          {outputOpen && runResult && (
+            <div className="border-t border-slate-200/50 bg-slate-900 text-white p-4 max-h-64 overflow-y-auto font-mono text-xs">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-bold">Output</h3>
+                <button
+                  onClick={() => setOutputOpen(false)}
+                  className="text-slate-400 hover:text-white"
+                >
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+              {runResult.stdout && (
+                <div className="mb-3">
+                  <p className="text-green-400 font-semibold mb-1">STDOUT:</p>
+                  <p className="text-slate-300 whitespace-pre-wrap">{runResult.stdout}</p>
                 </div>
               )}
-              <div className="flex-grow">
-                <MonacoEditor height="100%" language={language} value={code} onChange={handleCodeChange} theme="vs"
-                  options={{ fontSize: 14, minimap: { enabled: false }, padding: { top: 16 }, scrollBeyondLastLine: false }} />
-              </div>
-
-              {outputOpen && (
-                <div className="h-32 bg-on-surface text-white p-6 font-mono text-xs border-t border-outline-variant/10 overflow-y-auto">
-                  <div className="flex items-center gap-2 mb-2 text-brand-emerald">
-                    <span className="material-symbols-outlined text-sm">terminal</span>
-                    <span className="font-bold font-headline uppercase tracking-widest">Output Console</span>
-                  </div>
-                  {running ? (
-                    <p className="text-yellow-300 animate-pulse">&gt; Executing your code...</p>
-                  ) : runResult ? (
-                    <pre className={`whitespace-pre-wrap break-words ${getStatusColor(runResult.status)}`}>
-                      {outputText}
-                    </pre>
-                  ) : null}
+              {runResult.stderr && (
+                <div className="mb-3">
+                  <p className="text-red-400 font-semibold mb-1">STDERR:</p>
+                  <p className="text-slate-300 whitespace-pre-wrap">{runResult.stderr}</p>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Whiteboard */}
-          {activeTab === 'whiteboard' && (
-            <div className="flex-grow bg-white rounded-lg editorial-shadow overflow-hidden relative">
-              <canvas ref={canvasRef} className="w-full h-full" style={{ touchAction: 'none', cursor: 'crosshair' }} />
-              <div className="absolute top-3 left-3 flex items-center gap-2 bg-white rounded-lg shadow-md p-2 border border-outline-variant/10">
-                {['#000000', '#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#ffffff'].map(color => (
-                  <button key={color} onClick={() => setBrushColor(color)} className="w-7 h-7 rounded-full border-2 shadow transition"
-                    style={{ backgroundColor: color, borderColor: brushColor === color ? '#6366f1' : '#e5e7eb', transform: brushColor === color ? 'scale(1.2)' : 'scale(1)' }} />
-                ))}
-                <div className="w-px h-6 bg-outline-variant/20 mx-1" />
-                {[2, 5, 10].map(size => (
-                  <button key={size} onClick={() => setBrushSize(size)} className={`rounded-full bg-gray-300 transition ${brushSize === size ? 'ring-2 ring-brand-indigo' : ''}`}
-                    style={{ width: size * 2 + 8, height: size * 2 + 8 }} />
-                ))}
-                <div className="w-px h-6 bg-outline-variant/20 mx-1" />
-                <button onClick={clearCanvas} className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded hover:bg-red-200 font-headline font-bold">Clear</button>
-              </div>
+              {runResult.error && (
+                <p className="text-red-400">{runResult.error}</p>
+              )}
             </div>
           )}
         </section>
 
-        {/* ═══ RIGHT SIDEBAR: VIDEO & AI ═══ */}
-        <section className={`${showChat ? 'col-span-3' : 'col-span-4'} bg-surface-container-low border-l border-outline-variant/10 p-6 flex flex-col gap-6 overflow-y-auto transition-all`}>
+        {/* RIGHT SIDEBAR - VIDEO & AI */}
+        <section className={`${showChat ? 'col-span-3' : 'col-span-2'} bg-gradient-to-b from-slate-50 to-slate-100 border-l border-slate-200/50 p-4 flex flex-col gap-4 overflow-y-auto transition-all`}>
           {/* Video Feeds */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="relative bg-on-surface rounded-xl overflow-hidden editorial-shadow group" style={{ aspectRatio: '1' }}>
-              <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-              <div ref={localOverlayRef} className="absolute inset-0 flex items-center justify-center bg-on-surface" style={{ opacity: 1, zIndex: 10, transition: 'opacity 0.2s' }}>
-                <span className="text-white text-sm font-headline font-bold">You</span>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="relative bg-slate-800 rounded-xl overflow-hidden shadow-lg group" style={{ aspectRatio: '1' }}>
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-cover"
+              />
+              <div
+                ref={localOverlayRef}
+                className="absolute inset-0 flex items-center justify-center bg-slate-900/90 transition-opacity"
+                style={{ opacity: videoActive ? 0 : 1 }}
+              >
+                <span className="material-symbols-outlined text-white text-4xl">videocam_off</span>
               </div>
-              <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/40 backdrop-blur-md rounded text-[10px] text-white font-bold font-headline uppercase tracking-wider">You</div>
+              <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/50 backdrop-blur-sm rounded text-xs text-white font-bold">YOU</div>
             </div>
-            <div className="relative bg-on-surface rounded-xl overflow-hidden editorial-shadow group" style={{ aspectRatio: '1' }}>
-              <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-              <div ref={remoteOverlayRef} className="absolute inset-0 flex items-center justify-center bg-on-surface" style={{ opacity: 1, zIndex: 10, transition: 'opacity 0.2s' }}>
-                <span className="text-white text-sm font-headline font-bold">Interviewer</span>
+            <div className="relative bg-slate-800 rounded-xl overflow-hidden shadow-lg group" style={{ aspectRatio: '1' }}>
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+              <div
+                ref={remoteOverlayRef}
+                className="absolute inset-0 flex items-center justify-center bg-slate-900/90 transition-opacity"
+              >
+                <span className="material-symbols-outlined text-white text-4xl">person</span>
               </div>
-              <div className="absolute bottom-2 left-2 px-2 py-0.5 bg-black/40 backdrop-blur-md rounded text-[10px] text-white font-bold font-headline uppercase tracking-wider">Interviewer</div>
+              <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/50 backdrop-blur-sm rounded text-xs text-white font-bold">INTERVIEWER</div>
             </div>
           </div>
 
           {/* Screen Share */}
-          <div className="relative bg-on-surface rounded-xl overflow-hidden editorial-shadow" style={{ aspectRatio: '16/9' }}>
-            <video ref={screenVideoRef} autoPlay playsInline muted className="w-full h-full object-contain bg-black" />
-            <div ref={screenOverlayRef} className="absolute inset-0 flex flex-col items-center justify-center text-gray-600 text-xs gap-1" style={{ opacity: 1, background: '#111827', zIndex: 10, transition: 'opacity 0.2s' }}>
-              <span className="text-2xl">🖥</span>
-              <span>No screen share</span>
+          <div className="relative bg-slate-800 rounded-xl overflow-hidden shadow-lg" style={{ aspectRatio: '16/9' }}>
+            <video
+              ref={screenVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-contain bg-black"
+            />
+            <div
+              ref={screenOverlayRef}
+              className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 transition-opacity"
+              style={{ opacity: 1, background: '#1e293b' }}
+            >
+              <span className="material-symbols-outlined text-4xl mb-2">desktop_mac</span>
+              <span className="text-xs font-medium">No screen share</span>
             </div>
-            {(screenSharing || remoteScreenActive) && (
-              <div className="absolute top-2 right-2 bg-red-600 text-white text-xs px-2 py-0.5 rounded-full font-bold z-20 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" />LIVE
+            {screenSharing && (
+              <div className="absolute top-2 right-2 bg-red-600 text-white text-xs px-3 py-1 rounded-full font-bold z-20 flex items-center gap-2 animate-pulse">
+                <span className="w-1.5 h-1.5 bg-white rounded-full" />LIVE
               </div>
             )}
           </div>
 
           {/* AI Insights */}
-          <div className="space-y-2">
-            <h3 className="font-headline font-black text-lg text-brand-indigo flex items-center gap-2 uppercase tracking-tighter">
-              <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
-              AI Technical Insights
+          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
+            <h3 className="font-bold text-sm text-blue-600 flex items-center gap-2 mb-2 uppercase tracking-wide">
+              <span className="material-symbols-outlined text-lg">auto_awesome</span>AI Insights
             </h3>
-            <p className="text-xs text-on-surface-variant font-body">Real-time performance metrics and architectural feedback.</p>
+            <p className="text-xs text-slate-600 leading-relaxed mb-3">
+              Real-time performance metrics and technical feedback.
+            </p>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg border border-blue-200">
+                <span className="text-[9px] font-bold text-blue-700 block mb-1 uppercase tracking-wider">Efficiency</span>
+                <span className="text-lg font-black text-blue-900">92%</span>
+              </div>
+              <div className="bg-gradient-to-br from-green-50 to-green-100 p-3 rounded-lg border border-green-200">
+                <span className="text-[9px] font-bold text-green-700 block mb-1 uppercase tracking-wider">Score</span>
+                <span className="text-lg font-black text-green-900">88</span>
+              </div>
+            </div>
+            <button
+              onClick={getAIFeedback}
+              disabled={loadingFeedback}
+              className="w-full py-2 bg-blue-600 text-white rounded-lg font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
+            >
+              {loadingFeedback ? '⏳ Analyzing...' : '✨ Get Feedback'}
+            </button>
           </div>
-
-          {/* Metrics */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-white p-4 rounded-xl border border-outline-variant/10 editorial-shadow">
-              <span className="text-[9px] font-bold font-headline text-on-surface-variant uppercase tracking-widest block mb-2">Code Efficiency</span>
-              <div className="flex items-end gap-2">
-                <span className="text-2xl font-black text-on-surface font-headline">92%</span>
-                <span className="text-[10px] text-brand-emerald font-bold font-headline mb-1">+4%</span>
-              </div>
-            </div>
-            <div className="bg-white p-4 rounded-xl border border-outline-variant/10 editorial-shadow">
-              <span className="text-[9px] font-bold font-headline text-on-surface-variant uppercase tracking-widest block mb-2">Comm. Score</span>
-              <div className="flex items-end gap-2">
-                <span className="text-2xl font-black text-on-surface font-headline">88</span>
-                <span className="text-[10px] text-brand-indigo font-bold font-headline mb-1">High</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Feedback Cards */}
-          <div className="space-y-3">
-            <div className="bg-brand-indigo/[0.03] p-4 rounded-xl border-l-4 border-brand-indigo">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold font-headline uppercase text-brand-indigo tracking-widest">Logic Insight</span>
-                <span className="text-[10px] text-on-surface-variant">Just now</span>
-              </div>
-              <p className="text-xs text-on-surface leading-relaxed">
-                The candidate is correctly using <span className="font-bold text-brand-indigo">Recursive Depth-First Search</span>.
-              </p>
-            </div>
-            <div className="bg-brand-emerald/[0.03] p-4 rounded-xl border-l-4 border-brand-emerald">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold font-headline uppercase text-brand-emerald tracking-widest">Optimization</span>
-                <span className="text-[10px] text-on-surface-variant">2m ago</span>
-              </div>
-              <p className="text-xs text-on-surface leading-relaxed">
-                Consider <span className="font-bold text-brand-emerald">Iterative BFS</span> for memory optimization.
-              </p>
-            </div>
-          </div>
-
-          {/* AI Feedback Button */}
-          <button onClick={getAIFeedback} disabled={loadingFeedback} className="w-full py-3 bg-brand-indigo text-white rounded-lg font-headline font-bold text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all disabled:opacity-50">
-            {loadingFeedback ? '⏳ Analyzing...' : '✨ Get AI Feedback'}
-          </button>
         </section>
+
+        {/* CHAT SIDEBAR */}
+        {showChat && (
+          <aside className="col-span-3 bg-white border-r border-slate-200/50 flex flex-col overflow-hidden">
+            <div className="border-b border-slate-200/50 p-4">
+              <h3 className="font-bold text-slate-900 flex items-center gap-2">
+                <span className="material-symbols-outlined">chat</span>Discussion
+              </h3>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex ${msg.self ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-xs px-4 py-2 rounded-lg text-sm ${
+                      msg.self
+                        ? 'bg-blue-600 text-white rounded-br-none'
+                        : 'bg-slate-100 text-slate-900 rounded-bl-none'
+                    }`}
+                  >
+                    {msg.text}
+                  </div>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+            <div className="border-t border-slate-200/50 p-4 flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter' && chatInput.trim()) {
+                    setChatMessages([...chatMessages, { sender: username, text: chatInput, time: new Date().toLocaleTimeString(), self: true }])
+                    setChatInput('')
+                  }
+                }}
+                placeholder="Type a message..."
+                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <button className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all">
+                <span className="material-symbols-outlined">send</span>
+              </button>
+            </div>
+          </aside>
+        )}
       </main>
 
-      {/* ═══ BOTTOM NAV ═══ */}
-      <nav className="fixed bottom-0 left-0 w-full flex justify-center items-center space-x-12 px-12 z-50 bg-white/90 backdrop-blur-2xl h-16 border-t border-outline-variant/10">
-        <div className="flex items-center space-x-8">
-          {/* Mic Button */}
-          <button onClick={toggleMute} disabled={!micReady} className={`flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-lg transition-all duration-150 ${!micReady ? 'opacity-50 cursor-not-allowed text-on-surface-variant' : muted ? 'bg-red-600 text-white' : 'bg-brand-indigo text-white hover:brightness-110'}`}>
-            <span className="material-symbols-outlined text-lg">{muted ? 'mic_off' : 'mic'}</span>
-            <span className="font-headline font-bold text-[10px] uppercase tracking-wider">{muted ? 'Mic Off' : 'Mic On'}</span>
+      {/* ═══ BOTTOM CONTROL BAR ═══ */}
+      <nav className="bg-white border-t border-slate-200/50 px-6 py-4 flex items-center justify-center gap-8 shadow-lg">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={toggleMute}
+            disabled={!micReady}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+              !micReady
+                ? 'opacity-50 cursor-not-allowed text-slate-400'
+                : muted
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            <span className="material-symbols-outlined">{muted ? 'mic_off' : 'mic'}</span>
+            {muted ? 'Mic Off' : 'Mic On'}
           </button>
 
-          {/* Camera Button */}
-          <button onClick={videoActive ? stopVideo : startVideoCall} className={`flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-lg transition-all duration-150 ${videoActive ? 'bg-red-600 text-white' : 'bg-brand-indigo text-white hover:brightness-110'}`}>
-            <span className="material-symbols-outlined text-lg">{videoActive ? 'videocam_off' : 'videocam'}</span>
-            <span className="font-headline font-bold text-[10px] uppercase tracking-wider">{videoActive ? 'Cam Off' : 'Cam On'}</span>
+          <button
+            onClick={videoActive ? stopVideo : startVideoCall}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+              videoActive
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            <span className="material-symbols-outlined">{videoActive ? 'videocam_off' : 'videocam'}</span>
+            {videoActive ? 'Cam Off' : 'Cam On'}
           </button>
 
-          {/* Screen Share Button */}
-          <button onClick={screenSharing ? stopScreenShare : startScreenShare} disabled={shareButtonLocked} className={`flex items-center gap-2 py-2 px-6 rounded-lg font-headline font-bold text-xs uppercase tracking-widest transition-all duration-150 ${shareButtonLocked ? 'opacity-50 cursor-not-allowed bg-gray-400 text-white' : screenSharing ? 'bg-red-600 text-white hover:brightness-110' : 'bg-brand-indigo text-white hover:brightness-110'}`}>
+          <button
+            onClick={screenSharing ? stopScreenShare : startScreenShare}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+              screenSharing
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
             <span className="material-symbols-outlined">{screenSharing ? 'stop_circle' : 'screen_share'}</span>
-            {screenSharing ? 'Stop Share' : 'Share Screen'}
+            {screenSharing ? 'Stop Share' : 'Share'}
           </button>
 
-          {/* Record Button */}
-          <button className="flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-lg text-on-surface-variant hover:text-brand-indigo transition-all duration-150">
-            <span className="material-symbols-outlined text-lg">radio_button_checked</span>
-            <span className="font-headline font-bold text-[10px] uppercase tracking-wider">Record</span>
+          <button className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
+            <span className="material-symbols-outlined">radio_button_checked</span>
+            Record
           </button>
         </div>
-        <div className="h-8 w-px bg-outline-variant/20 mx-4"></div>
-        <button className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg font-headline font-bold text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-red-600/30">
+
+        <div className="w-px h-8 bg-slate-200" />
+
+        <button className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg font-semibold text-sm hover:bg-red-700 transition-all active:scale-95">
           <span className="material-symbols-outlined">call_end</span>
           Leave Call
         </button>
