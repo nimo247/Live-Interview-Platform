@@ -24,12 +24,6 @@ interface RunResult {
   error: string
 }
 
-interface Notification {
-  id: string
-  message: string
-  type: 'success' | 'error' | 'info' | 'warning'
-}
-
 type DisplayMediaStreamOptions = {
   video: { width?: { ideal?: number }; height?: { ideal?: number } }
   audio: boolean
@@ -59,18 +53,16 @@ export default function RoomPage() {
   const username = searchParams.get('username') || 'Anonymous'
 
   // Core States
-  const [code, setCode] = useState('import math\n\nclass GraphAnalyzer:\n    def __init__(self, nodes):\n        self.nodes = nodes\n        self.adj = {i: [] for i in range(nodes)}\n\n    # Find shortest path using Dijkstra\n    def shortest_path(self, start, end):\n        distances = {node: float(\'inf\') for node in self.nodes}\n        distances[start] = 0\n        priority_queue = [(0, start)]\n')
+  const [code, setCode] = useState('import math\n\nclass GraphAnalyzer:\n    def __init__(self, nodes):\n        self.nodes = nodes\n        self.adj = {i: [] for i in range(nodes)}\n\n    def shortest_path(self, start, end):\n        distances = {node: float(\'inf\') for node in self.nodes}\n        distances[start] = 0\n        priority_queue = [(0, start)]\n')
   const [language, setLanguage] = useState('python')
   const [activeTab, setActiveTab] = useState<'code' | 'console'>('code')
   const [connected, setConnected] = useState(false)
-  const [notifications, setNotifications] = useState<Notification[]>([])
 
   // Video & Audio States
   const [videoActive, setVideoActive] = useState(false)
   const [muted, setMuted] = useState(false)
-  const [micReady, setMicReady] = useState(false)
+  const [micReady, setMicReady] = useState(true)
   const [screenSharing, setScreenSharing] = useState(false)
-  const [remoteScreenActive, setRemoteScreenActive] = useState(false)
 
   // Chat States
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -86,7 +78,6 @@ export default function RoomPage() {
   const [running, setRunning] = useState(false)
   const [outputOpen, setOutputOpen] = useState(false)
   const [stdinInput, setStdinInput] = useState('')
-  const [showStdin, setShowStdin] = useState(false)
 
   // Timer States
   const [timerSeconds, setTimerSeconds] = useState(1458)
@@ -94,26 +85,10 @@ export default function RoomPage() {
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const timerSecondsRef = useRef(1458)
 
-  // Drawing States
-  const [brushColor, setBrushColor] = useState('#c0c1ff')
-  const [brushSize, setBrushSize] = useState(3)
-  const [feedback, setFeedback] = useState('Candidate is implementing Min-Heap Dijkstra. Suggest asking about handling negative edge weights if performance stays high.')
-  const [loadingFeedback, setLoadingFeedback] = useState(false)
-
   // Media Refs
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
-  const screenVideoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  // Peer & Stream Refs
-  const peerRef = useRef<SimplePeer.Instance | null>(null)
-  const localStreamRef = useRef<MediaStream | null>(null)
-  const screenStreamRef = useRef<MediaStream | null>(null)
-
-  // Drawing Refs
-  const isDrawing = useRef(false)
-  const lastPos = useRef<{ x: number; y: number } | null>(null)
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -132,7 +107,7 @@ export default function RoomPage() {
     }
   }, [timerRunning])
 
-  // Format time for timer
+  // Format time
   const formatTime = useCallback((secs: number) => {
     const h = Math.floor(secs / 3600).toString().padStart(2, '0')
     const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0')
@@ -140,20 +115,10 @@ export default function RoomPage() {
     return `${h}:${m}:${s}`
   }, [])
 
-  // Add notification
-  const addNotification = useCallback((message: string, type: Notification['type'] = 'info') => {
-    const id = Date.now().toString()
-    setNotifications(prev => [...prev, { id, message, type }])
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id))
-    }, 3000)
-  }, [])
-
   // Run code
   const runCode = async () => {
     setRunning(true)
     setOutputOpen(true)
-    setRunResult(null)
     try {
       const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
       const res = await fetch(`${backendUrl}/rooms/execute`, {
@@ -163,14 +128,12 @@ export default function RoomPage() {
       })
       const data = await res.json()
       setRunResult(data)
-      addNotification('Code executed successfully', 'success')
     } catch (e) {
       setRunResult({
         stdout: '', stderr: '', compile_output: '',
         status: 'Error', time: null, memory: null,
-        error: 'Could not reach backend. Is it running?'
+        error: 'Could not reach backend.'
       })
-      addNotification('Execution failed', 'error')
     } finally {
       setRunning(false)
     }
@@ -186,47 +149,43 @@ export default function RoomPage() {
     a.download = `solution.${ext}`
     a.click()
     URL.revokeObjectURL(url)
-    addNotification('Code downloaded!', 'success')
-  }, [code, language, addNotification])
+  }, [code, language])
 
-  // Copy code to clipboard
+  // Copy code
   const copyCode = useCallback(() => {
     navigator.clipboard.writeText(code)
-    addNotification('Copied to clipboard!', 'success')
-  }, [code, addNotification])
+  }, [code])
 
   // Toggle mute
   const toggleMute = useCallback(() => {
     setMuted(!muted)
   }, [muted])
 
-  // Start video call
+  // Start video
   const startVideoCall = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false
       })
-      localStreamRef.current = stream
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream
       }
       setVideoActive(true)
-      addNotification('Camera started', 'success')
     } catch (e) {
-      addNotification('Camera access denied', 'error')
+      console.error('Camera error:', e)
     }
   }
 
   // Stop video
   const stopVideo = useCallback(() => {
-    localStreamRef.current?.getTracks().forEach(track => track.stop())
-    if (localVideoRef.current) {
+    if (localVideoRef.current?.srcObject) {
+      const tracks = (localVideoRef.current.srcObject as MediaStream).getTracks()
+      tracks.forEach(track => track.stop())
       localVideoRef.current.srcObject = null
     }
     setVideoActive(false)
-    addNotification('Camera stopped', 'info')
-  }, [addNotification])
+  }, [])
 
   // Start screen share
   const startScreenShare = async () => {
@@ -235,32 +194,22 @@ export default function RoomPage() {
         video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false
       } as DisplayMediaStreamOptions)
-      screenStreamRef.current = stream
-      if (screenVideoRef.current) {
-        screenVideoRef.current.srcObject = stream
-      }
       setScreenSharing(true)
-      addNotification('Screen sharing started', 'success')
       stream.getVideoTracks()[0].onended = () => {
         stopScreenShare()
       }
     } catch (e) {
-      addNotification('Screen share denied', 'error')
+      console.error('Screen share error:', e)
     }
   }
 
   // Stop screen share
   const stopScreenShare = useCallback(() => {
-    screenStreamRef.current?.getTracks().forEach(track => track.stop())
-    if (screenVideoRef.current) {
-      screenVideoRef.current.srcObject = null
-    }
     setScreenSharing(false)
-    addNotification('Screen sharing stopped', 'info')
-  }, [addNotification])
+  }, [])
 
   return (
-    <div className="h-screen flex flex-col bg-[#0b1326] text-on-surface selection:bg-primary/30 min-h-screen overflow-hidden font-body">
+    <div className="h-screen flex flex-col bg-[#0b1326] text-[#dae2fd] overflow-hidden">
       <style>{`
         body { font-family: 'Inter', sans-serif; }
         .font-headline { font-family: 'Space Grotesk', sans-serif; }
@@ -275,98 +224,114 @@ export default function RoomPage() {
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #31394d; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #464554; }
-        .slate-surface { background: #0b1326; }
-        .slate-container-low { background: #131b2e; }
-        .slate-container-high { background: #222a3d; }
       `}</style>
 
       {/* ═══ TOP NAV BAR ═══ */}
-      <nav className="fixed top-0 w-full z-50 bg-[#0b1326]/80 backdrop-blur-xl shadow-[0px_20px_40px_rgba(6,14,32,0.4)] flex justify-between items-center px-8 h-16 border-b border-[#464554]/10">
-        <div className="flex items-center gap-12">
-          <div className="text-xl font-bold tracking-tighter text-[#c0c1ff] font-headline">InterviewElite</div>
-          <div className="hidden md:flex gap-8 items-center font-headline text-sm tracking-wide">
-            <a className="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors" href="#">Dashboard</a>
-            <a className="text-[#c0c1ff] border-b-2 border-[#c0c1ff] pb-1" href="#">Sessions</a>
-            <a className="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors" href="#">Insights</a>
+      <nav className="fixed top-0 w-full z-50 bg-[#0b1326]/95 backdrop-blur-xl border-b border-[#464554]/10 px-8 py-4 flex justify-between items-center h-20 shadow-lg">
+        <div className="flex items-center gap-16">
+          <div className="text-2xl font-bold tracking-tight text-[#c0c1ff] font-headline">InterviewElite</div>
+          <div className="hidden lg:flex gap-8 items-center font-headline text-sm tracking-wide">
+            <a className="text-[#c7c4d7] hover:text-[#c0c1ff] pb-2 transition-colors" href="#">Dashboard</a>
+            <a className="text-[#c0c1ff] border-b-2 border-[#c0c1ff] pb-2" href="#">Sessions</a>
+            <a className="text-[#c7c4d7] hover:text-[#c0c1ff] pb-2 transition-colors" href="#">Insights</a>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          <button className="px-4 py-1.5 rounded-lg text-sm font-medium text-[#c7c4d7] hover:bg-[#31394d]/50 transition-all active:scale-95">End Session</button>
-          <button className="px-5 py-1.5 rounded-lg text-sm font-bold bg-[#8083ff] text-[#0d0096] shadow-lg shadow-[#8083ff]/20 transition-all active:scale-95">Go Live</button>
-          <div className="w-8 h-8 rounded-full overflow-hidden border border-[#464554]/30 ml-2 bg-gradient-to-br from-[#4cd7f6] to-[#c0c1ff]" />
+        <div className="flex items-center gap-6">
+          <button className="px-5 py-2 rounded-lg text-sm font-medium text-[#c7c4d7] hover:bg-[#31394d]/50 transition-all">End Session</button>
+          <button className="px-6 py-2 rounded-lg text-sm font-bold bg-[#8083ff] text-[#0d0096] hover:brightness-110 shadow-lg shadow-[#8083ff]/30 transition-all">Go Live</button>
+          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#4cd7f6] to-[#c0c1ff] border border-[#464554]/30" />
         </div>
       </nav>
 
       {/* ═══ MAIN CONTENT ═══ */}
-      <main className="flex-1 flex gap-0 pt-16 overflow-hidden">
+      <main className="flex-1 flex gap-0 pt-20 pb-28 overflow-hidden">
         
-        {/* LEFT SIDEBAR - NAVIGATION & CONSOLE */}
-        <aside className="w-64 bg-[#131b2e] flex flex-col border-r border-[#464554]/5 overflow-hidden">
-          {/* Toolset Header */}
+        {/* LEFT SIDEBAR */}
+        <aside className="w-72 bg-[#131b2e]/80 flex flex-col border-r border-[#464554]/5 overflow-hidden">
           <div className="px-6 py-6 border-b border-[#464554]/10">
             <h3 className="font-headline text-xs font-semibold uppercase tracking-[0.05em] text-[#4cd7f6]">Interview Toolset</h3>
-            <p className="text-[10px] text-[#c7c4d7]/60 font-medium tracking-wider">Technical Session v2.4</p>
+            <p className="text-[11px] text-[#c7c4d7]/60 font-medium tracking-wider mt-1">Technical Session v2.4</p>
           </div>
 
-          {/* Navigation */}
-          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-            <a href="#" className="flex items-center gap-3 px-4 py-3 bg-[#222a3d]/60 text-[#4cd7f6] border-r-2 border-[#4cd7f6] font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300 rounded-r-lg">
-              <span className="material-symbols-outlined text-lg">code</span>
-              Code Editor
+          <nav className="flex-1 px-3 py-4 space-y-2 overflow-y-auto">
+            <a href="#" className="flex items-center gap-4 px-5 py-4 bg-[#222a3d]/80 text-[#4cd7f6] border-r-3 border-[#4cd7f6] font-headline text-sm font-semibold uppercase tracking-widest transition-all rounded-r-xl hover:bg-[#222a3d]">
+              <span className="material-symbols-outlined text-2xl">code</span>
+              <div>
+                <div>Code Editor</div>
+                <div className="text-[10px] text-[#c7c4d7]/50 font-normal">Active</div>
+              </div>
             </a>
-            <a href="#" className="flex items-center gap-3 px-4 py-3 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d] hover:opacity-100 font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300">
-              <span className="material-symbols-outlined text-lg">videocam</span>
-              Video
+            <a href="#" className="flex items-center gap-4 px-5 py-4 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d]/40 hover:opacity-100 font-headline text-sm font-semibold uppercase tracking-widest transition-all rounded-xl">
+              <span className="material-symbols-outlined text-2xl">videocam</span>
+              <div>
+                <div>Video</div>
+                <div className="text-[10px] text-[#c7c4d7]/50 font-normal">Streaming</div>
+              </div>
             </a>
-            <a href="#" className="flex items-center gap-3 px-4 py-3 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d] hover:opacity-100 font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300">
-              <span className="material-symbols-outlined text-lg">psychology</span>
-              AI Insights
+            <a href="#" className="flex items-center gap-4 px-5 py-4 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d]/40 hover:opacity-100 font-headline text-sm font-semibold uppercase tracking-widest transition-all rounded-xl">
+              <span className="material-symbols-outlined text-2xl">psychology</span>
+              <div>
+                <div>AI Insights</div>
+                <div className="text-[10px] text-[#c7c4d7]/50 font-normal">Real-time</div>
+              </div>
             </a>
-            <a href="#" className="flex items-center gap-3 px-4 py-3 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d] hover:opacity-100 font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300">
-              <span className="material-symbols-outlined text-lg">architecture</span>
-              Whiteboard
+            <a href="#" className="flex items-center gap-4 px-5 py-4 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d]/40 hover:opacity-100 font-headline text-sm font-semibold uppercase tracking-widest transition-all rounded-xl">
+              <span className="material-symbols-outlined text-2xl">architecture</span>
+              <div>
+                <div>Whiteboard</div>
+                <div className="text-[10px] text-[#c7c4d7]/50 font-normal">Collaborative</div>
+              </div>
             </a>
           </nav>
 
-          {/* Console Output */}
-          <div className="flex-1 flex flex-col border-t border-[#464554]/10 overflow-hidden">
-            <div className="px-6 py-4">
-              <h4 className="text-xs font-bold text-[#c0c1ff] uppercase tracking-widest">Session Tools</h4>
-            </div>
-            <div className="flex-1 px-4 py-3 overflow-y-auto space-y-2 text-[11px] font-mono text-[#c7c4d7]/70">
-              <div className="text-green-400">✓ graph_analyzer.py initialized...</div>
-              <div className="text-green-400">✓ Running test cases (0/4)</div>
-              <div className="text-yellow-400">⚠ Unused variable 'math' on line 1</div>
-              <div className="text-green-400">✓ Solution compiling...</div>
+          <div className="border-t border-[#464554]/10 px-6 py-6">
+            <h4 className="text-xs font-bold text-[#c0c1ff] uppercase tracking-widest mb-4">Session Tools</h4>
+            <div className="space-y-2 text-[11px] font-mono text-[#c7c4d7]/70">
+              <div className="flex items-center gap-2 text-green-400">
+                <div className="w-2 h-2 rounded-full bg-green-400" />
+                graph_analyzer.py initialized
+              </div>
+              <div className="flex items-center gap-2 text-green-400">
+                <div className="w-2 h-2 rounded-full bg-green-400" />
+                Running test cases (0/4)
+              </div>
+              <div className="flex items-center gap-2 text-yellow-400">
+                <div className="w-2 h-2 rounded-full bg-yellow-400" />
+                Unused variable 'math' on line 1
+              </div>
+              <div className="flex items-center gap-2 text-green-400">
+                <div className="w-2 h-2 rounded-full bg-green-400" />
+                Solution compiling...
+              </div>
             </div>
           </div>
         </aside>
 
         {/* CENTER - CODE EDITOR */}
         <section className="flex-1 flex flex-col overflow-hidden bg-[#0b1326]">
-          {/* Editor Toolbar */}
-          <div className="border-b border-[#464554]/10 px-6 py-3 flex items-center justify-between bg-[#131b2e]/40">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1 bg-[#222a3d]/50 px-3 py-1.5 rounded-lg border border-[#464554]/20">
-                <span className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest">solution.py</span>
-                <span className="text-[#4cd7f6] text-xs font-bold ml-2">Python 3.10</span>
+          {/* Toolbar */}
+          <div className="border-b border-[#464554]/10 px-6 py-4 flex items-center justify-between bg-[#131b2e]/40">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-[#222a3d]/70 px-4 py-2 rounded-lg border border-[#464554]/30">
+                <span className="text-[11px] text-[#c7c4d7]/70 uppercase font-bold tracking-widest">solution.py</span>
+                <span className="text-[#4cd7f6] text-xs font-bold ml-3 px-2 py-1 bg-[#4cd7f6]/20 rounded">Python 3.10</span>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button onClick={runCode} disabled={running} className="flex items-center gap-2 px-4 py-1.5 bg-[#4cd7f6] text-[#001f26] rounded-lg font-bold text-xs hover:brightness-110 disabled:opacity-50 transition-all active:scale-95">
-                <span className="material-symbols-outlined text-base">{running ? 'hourglass_empty' : 'play_arrow'}</span>
+            <div className="flex items-center gap-3">
+              <button onClick={runCode} disabled={running} className="flex items-center gap-2 px-5 py-2.5 bg-[#4cd7f6] text-[#001f26] rounded-lg font-bold text-sm hover:brightness-110 disabled:opacity-50 transition-all active:scale-95 shadow-lg shadow-[#4cd7f6]/30">
+                <span className="material-symbols-outlined">{running ? 'hourglass_empty' : 'play_arrow'}</span>
                 {running ? 'Running...' : 'Run Code'}
               </button>
-              <button onClick={copyCode} className="px-3 py-1.5 bg-[#222a3d]/50 text-[#c7c4d7] rounded-lg hover:bg-[#222a3d] transition-all border border-[#464554]/20">
+              <button onClick={copyCode} className="flex items-center gap-2 px-4 py-2.5 bg-[#222a3d]/70 text-[#c7c4d7] rounded-lg hover:bg-[#222a3d] transition-all border border-[#464554]/30 tooltip" title="Copy Code">
                 <span className="material-symbols-outlined">content_copy</span>
               </button>
-              <button onClick={downloadCode} className="px-3 py-1.5 bg-[#222a3d]/50 text-[#c7c4d7] rounded-lg hover:bg-[#222a3d] transition-all border border-[#464554]/20">
+              <button onClick={downloadCode} className="flex items-center gap-2 px-4 py-2.5 bg-[#222a3d]/70 text-[#c7c4d7] rounded-lg hover:bg-[#222a3d] transition-all border border-[#464554]/30 tooltip" title="Download">
                 <span className="material-symbols-outlined">download</span>
               </button>
             </div>
           </div>
 
-          {/* Code Editor */}
+          {/* Editor */}
           <div className="flex-1 overflow-hidden">
             <MonacoEditor
               height="100%"
@@ -375,24 +340,23 @@ export default function RoomPage() {
               onChange={(value) => setCode(value || '')}
               theme="vs-dark"
               options={{
-                fontSize: 13,
+                fontSize: 14,
                 minimap: { enabled: false },
                 wordWrap: 'on',
                 scrollBeyondLastLine: false,
                 formatOnPaste: true,
-                formatOnType: true,
                 padding: { top: 16, bottom: 16 },
               } as any}
             />
           </div>
 
-          {/* Output Panel */}
+          {/* Output */}
           {outputOpen && runResult && (
-            <div className="border-t border-[#464554]/10 bg-[#060e20] p-4 max-h-40 overflow-y-auto">
-              <div className="flex items-center justify-between mb-2">
+            <div className="border-t border-[#464554]/10 bg-[#060e20]/80 p-4 max-h-48 overflow-y-auto">
+              <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-bold text-[#c0c1ff] uppercase tracking-widest">Output</h3>
                 <button onClick={() => setOutputOpen(false)} className="text-[#c7c4d7]/60 hover:text-[#c0c1ff]">
-                  <span className="material-symbols-outlined text-sm">close</span>
+                  <span className="material-symbols-outlined">close</span>
                 </button>
               </div>
               <div className="space-y-2 text-[11px] font-mono">
@@ -414,45 +378,44 @@ export default function RoomPage() {
           )}
         </section>
 
-        {/* RIGHT SIDEBAR - VIDEOS & INSIGHTS */}
-        <aside className="w-96 bg-[#131b2e] border-l border-[#464554]/5 flex flex-col overflow-hidden">
-          {/* Videos Section */}
+        {/* RIGHT SIDEBAR */}
+        <aside className="w-96 bg-[#131b2e]/80 border-l border-[#464554]/5 flex flex-col overflow-hidden">
+          
+          {/* Videos */}
           <div className="px-6 py-6 space-y-4 border-b border-[#464554]/10">
-            {/* Candidate Video */}
-            <div className="relative rounded-xl overflow-hidden aspect-video shadow-xl border border-[#464554]/20 bg-[#0b1326]">
-              <div className="w-full h-full bg-gradient-to-br from-[#4cd7f6]/20 to-transparent flex items-center justify-center">
+            {/* Candidate */}
+            <div className="relative rounded-2xl overflow-hidden aspect-video shadow-xl border border-[#464554]/30 bg-gradient-to-br from-orange-500/30 to-transparent">
+              <div className="w-full h-full flex items-center justify-center">
                 <div className="text-center">
-                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 mx-auto mb-3 flex items-center justify-center text-4xl">👨</div>
-                  <p className="text-[#c7c4d7] text-sm font-semibold">Sarah Jenkins</p>
+                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 mx-auto mb-3 flex items-center justify-center text-5xl shadow-lg">👨</div>
                 </div>
               </div>
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-80" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
               <div className="absolute bottom-3 left-3 flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[10px] font-bold text-white tracking-widest uppercase">Sarah Jenkins (Candidate)</span>
+                <div className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[11px] font-bold text-white tracking-widest uppercase">Sarah Jenkins</span>
               </div>
               <div className="absolute top-3 right-3">
-                <div className="glass-panel p-1.5 rounded-lg text-white/90 border border-white/10">
-                  <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>mic</span>
+                <div className="glass-panel p-2 rounded-lg text-white/90 border border-white/20 shadow-lg">
+                  <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>mic</span>
                 </div>
               </div>
             </div>
 
-            {/* Interviewer Video */}
-            <div className="relative rounded-xl overflow-hidden aspect-video shadow-xl border border-[#464554]/20 bg-[#0b1326]">
-              <div className="w-full h-full bg-gradient-to-br from-teal-400/20 to-transparent flex items-center justify-center">
+            {/* Interviewer */}
+            <div className="relative rounded-2xl overflow-hidden aspect-video shadow-xl border border-[#464554]/30 bg-gradient-to-br from-teal-500/30 to-transparent">
+              <div className="w-full h-full flex items-center justify-center">
                 <div className="text-center">
-                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 mx-auto mb-3 flex items-center justify-center text-4xl">👤</div>
-                  <p className="text-[#c7c4d7] text-sm font-semibold">David Chen</p>
+                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 mx-auto mb-3 flex items-center justify-center text-5xl shadow-lg">👤</div>
                 </div>
               </div>
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-80" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
               <div className="absolute bottom-3 left-3">
-                <span className="text-[10px] font-bold text-white tracking-widest uppercase">David Chen (You)</span>
+                <span className="text-[11px] font-bold text-white tracking-widest uppercase">David Chen (You)</span>
               </div>
               <div className="absolute top-3 right-3">
-                <div className="glass-panel p-1.5 rounded-lg text-white/90 border border-white/10">
-                  <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>mic</span>
+                <div className="glass-panel p-2 rounded-lg text-white/90 border border-white/20 shadow-lg">
+                  <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: "'FILL' 1" }}>mic</span>
                 </div>
               </div>
             </div>
@@ -460,76 +423,77 @@ export default function RoomPage() {
 
           {/* Session Intelligence */}
           <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+            {/* Header */}
             <div className="border-b border-[#464554]/10 pb-4">
               <div className="flex items-center justify-between">
-                <h4 className="font-headline text-sm font-bold tracking-tight text-[#c0c1ff]">Session Intelligence</h4>
-                <span className="px-2 py-0.5 rounded-full bg-[#4cd7f6]/10 text-[#4cd7f6] text-[9px] font-black uppercase tracking-tighter border border-[#4cd7f6]/20">Real-time</span>
+                <h4 className="font-headline text-base font-bold text-[#c0c1ff]">Session Intelligence</h4>
+                <span className="px-3 py-1 rounded-full bg-[#4cd7f6]/20 text-[#4cd7f6] text-[10px] font-black uppercase tracking-tight border border-[#4cd7f6]/30">Real-time</span>
               </div>
             </div>
 
             {/* Metrics */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="p-4 rounded-xl bg-[#222a3d]/40 border border-[#464554]/10">
-                <div className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest mb-1">Efficiency</div>
-                <div className="text-2xl font-headline font-bold text-[#4cd7f6]">92<span className="text-xs text-[#c7c4d7]/40 ml-1">%</span></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-5 rounded-xl bg-[#222a3d]/60 border border-[#464554]/20 hover:border-[#4cd7f6]/40 transition-all">
+                <div className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest mb-2">Efficiency</div>
+                <div className="text-3xl font-headline font-bold text-[#4cd7f6]">92<span className="text-xs text-[#c7c4d7]/40 ml-1">%</span></div>
               </div>
-              <div className="p-4 rounded-xl bg-[#222a3d]/40 border border-[#464554]/10">
-                <div className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest mb-1">Clarity</div>
-                <div className="text-2xl font-headline font-bold text-[#c0c1ff]">85<span className="text-xs text-[#c7c4d7]/40 ml-1">%</span></div>
+              <div className="p-5 rounded-xl bg-[#222a3d]/60 border border-[#464554]/20 hover:border-[#c0c1ff]/40 transition-all">
+                <div className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest mb-2">Clarity</div>
+                <div className="text-3xl font-headline font-bold text-[#c0c1ff]">85<span className="text-xs text-[#c7c4d7]/40 ml-1">%</span></div>
               </div>
             </div>
 
             {/* Chat */}
-            <div className="border border-[#464554]/10 rounded-xl bg-[#060e20]/50 overflow-hidden h-64 flex flex-col">
-              <div className="p-3 border-b border-[#464554]/10 bg-[#131b2e] flex justify-between items-center">
-                <span className="text-[10px] font-bold text-[#c7c4d7] uppercase tracking-widest flex items-center gap-2">
-                  <span className="material-symbols-outlined text-sm">chat</span>
+            <div className="border border-[#464554]/20 rounded-2xl bg-[#060e20]/60 overflow-hidden h-72 flex flex-col">
+              <div className="p-4 border-b border-[#464554]/20 bg-[#131b2e]/80 flex justify-between items-center">
+                <span className="text-[11px] font-bold text-[#c7c4d7] uppercase tracking-widest flex items-center gap-3">
+                  <span className="material-symbols-outlined">chat</span>
                   Session Chat
                 </span>
-                <span className="w-2 h-2 rounded-full bg-green-500" />
+                <span className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
                 {chatMessages.map((msg, i) => (
-                  <div key={i} className={`flex flex-col gap-1 ${msg.self ? 'items-end' : 'items-start'}`}>
-                    <span className="text-[9px] text-[#c7c4d7]/60 font-bold">{msg.sender}</span>
-                    <div className={`${msg.self ? 'bg-[#4cd7f6]/10 border-[#4cd7f6]/20 text-on-surface' : 'bg-[#222a3d] border-[#464554]/20 text-[#c7c4d7]/90'} px-3 py-2 rounded-2xl ${msg.self ? 'rounded-tr-none' : 'rounded-tl-none'} text-[11px] max-w-[85%] border`}>
+                  <div key={i} className={`flex flex-col gap-1.5 ${msg.self ? 'items-end' : 'items-start'}`}>
+                    <span className="text-[10px] text-[#c7c4d7]/60 font-bold px-1">{msg.sender}</span>
+                    <div className={`${msg.self ? 'bg-[#4cd7f6]/15 border-[#4cd7f6]/30 text-[#dae2fd]' : 'bg-[#222a3d]/80 border-[#464554]/30 text-[#c7c4d7]/90'} px-4 py-3 rounded-2xl ${msg.self ? 'rounded-tr-none' : 'rounded-tl-none'} text-[12px] max-w-[85%] border`}>
                       {msg.text}
                     </div>
                   </div>
                 ))}
                 <div ref={chatEndRef} />
               </div>
-              <div className="p-2 border-t border-[#464554]/10 bg-[#131b2e]">
-                <div className="relative">
-                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Send a message..." className="w-full bg-[#060e20] border-none rounded-lg py-2 pl-3 pr-10 text-xs focus:ring-1 focus:ring-[#4cd7f6]/50 placeholder:text-[#c7c4d7]/30" />
-                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-[#4cd7f6] hover:text-[#acedff] transition-colors">
-                    <span className="material-symbols-outlined text-lg">send</span>
+              <div className="p-3 border-t border-[#464554]/20 bg-[#131b2e]/80">
+                <div className="relative flex items-center">
+                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Send a message..." className="w-full bg-[#060e20]/80 border border-[#464554]/30 rounded-xl py-2.5 pl-4 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-[#4cd7f6]/50 placeholder:text-[#c7c4d7]/30 transition-all" />
+                  <button className="absolute right-3 text-[#4cd7f6] hover:text-[#acedff] transition-colors">
+                    <span className="material-symbols-outlined text-xl">send</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Strategy Analysis */}
-            <div className="glass-panel p-4 rounded-xl border border-[#464554]/10">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="material-symbols-outlined text-[#4cd7f6] text-base">lightbulb</span>
-                <span className="text-[10px] font-bold text-on-surface tracking-widest uppercase">Strategy Analysis</span>
+            {/* Strategy */}
+            <div className="glass-panel p-5 rounded-2xl border border-[#464554]/20">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="material-symbols-outlined text-[#4cd7f6] text-2xl">lightbulb</span>
+                <span className="text-[11px] font-bold text-[#dae2fd] tracking-widest uppercase">Strategy Analysis</span>
               </div>
-              <p className="text-[11px] text-[#c7c4d7] leading-relaxed">
+              <p className="text-[12px] text-[#c7c4d7]/90 leading-relaxed">
                 Candidate is implementing <span className="text-[#4cd7f6] font-semibold">Min-Heap Dijkstra</span>. Suggest asking about handling negative edge weights if performance stays high.
               </p>
             </div>
 
             {/* Transcript */}
-            <div className="pb-2">
-              <div className="flex items-center justify-between text-[10px] font-bold text-[#c7c4d7]/40 uppercase tracking-[0.2em] mb-4">
+            <div className="pb-4">
+              <div className="flex items-center justify-between text-[10px] font-bold text-[#c7c4d7]/40 uppercase tracking-[0.15em] mb-3">
                 <span>Live Transcript</span>
-                <span className="material-symbols-outlined text-xs">more_horiz</span>
+                <span className="material-symbols-outlined text-sm cursor-pointer hover:text-[#c7c4d7]/60">more_horiz</span>
               </div>
               <div className="space-y-3">
                 <div className="flex gap-3">
-                  <div className="w-6 h-6 rounded-lg bg-[#222a3d] flex-shrink-0 flex items-center justify-center text-[9px] font-bold text-[#c7c4d7]">SJ</div>
-                  <p className="text-[10px] text-[#c7c4d7]/70 leading-tight">"Actually, looking at the constraints, I might need to optimize the priority queue handling..."</p>
+                  <div className="w-7 h-7 rounded-lg bg-[#222a3d]/80 flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-[#c7c4d7] border border-[#464554]/30">SJ</div>
+                  <p className="text-[12px] text-[#c7c4d7]/70 leading-relaxed">"Actually, looking at the constraints, I might need to optimize the priority queue handling..."</p>
                 </div>
               </div>
             </div>
@@ -538,34 +502,69 @@ export default function RoomPage() {
       </main>
 
       {/* ═══ FLOATING CONTROL BAR ═══ */}
-      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 glass-panel px-6 py-3 rounded-2xl border border-[#464554]/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] flex items-center gap-8">
-        <div className="flex items-center gap-2 border-r border-[#464554]/20 pr-8">
-          <button onClick={toggleMute} className="w-10 h-10 rounded-xl flex items-center justify-center text-[#c7c4d7] hover:text-white hover:bg-[#31394d] transition-all group relative">
-            <span className="material-symbols-outlined">{muted ? 'mic_off' : 'mic'}</span>
-            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#222a3d] text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+      <footer className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 glass-panel px-8 py-4 rounded-3xl border border-[#464554]/30 shadow-2xl flex items-center gap-8">
+        
+        {/* Media Controls */}
+        <div className="flex items-center gap-3 border-r border-[#464554]/30 pr-8">
+          {/* Mic Button */}
+          <button 
+            onClick={toggleMute}
+            className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-lg group relative ${
+              muted 
+                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/40 border border-red-600/40' 
+                : 'bg-[#4cd7f6]/20 text-[#4cd7f6] hover:bg-[#4cd7f6]/40 border border-[#4cd7f6]/40'
+            }`}
+            title={muted ? 'Unmute Microphone' : 'Mute Microphone'}
+          >
+            <span className="material-symbols-outlined text-2xl">{muted ? 'mic_off' : 'mic'}</span>
+            <div className="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-2 bg-[#222a3d] text-[11px] rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-[#464554]/50 shadow-lg">
               {muted ? 'Unmute' : 'Mute'}
             </div>
           </button>
-          <button onClick={videoActive ? stopVideo : startVideoCall} className="w-10 h-10 rounded-xl flex items-center justify-center text-[#c7c4d7] hover:text-white hover:bg-[#31394d] transition-all group relative">
-            <span className="material-symbols-outlined">{videoActive ? 'videocam_off' : 'videocam'}</span>
-            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#222a3d] text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+
+          {/* Camera Button */}
+          <button 
+            onClick={videoActive ? stopVideo : startVideoCall}
+            className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-lg group relative ${
+              videoActive 
+                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/40 border border-red-600/40' 
+                : 'bg-[#4cd7f6]/20 text-[#4cd7f6] hover:bg-[#4cd7f6]/40 border border-[#4cd7f6]/40'
+            }`}
+            title={videoActive ? 'Stop Camera' : 'Start Camera'}
+          >
+            <span className="material-symbols-outlined text-2xl">{videoActive ? 'videocam_off' : 'videocam'}</span>
+            <div className="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-2 bg-[#222a3d] text-[11px] rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-[#464554]/50 shadow-lg">
               {videoActive ? 'Stop Camera' : 'Start Camera'}
             </div>
           </button>
-          <button onClick={screenSharing ? stopScreenShare : startScreenShare} className="w-10 h-10 rounded-xl flex items-center justify-center text-[#c7c4d7] hover:text-white hover:bg-[#31394d] transition-all group relative">
-            <span className="material-symbols-outlined">{screenSharing ? 'stop_circle' : 'screen_share'}</span>
-            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#222a3d] text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+
+          {/* Screen Share Button */}
+          <button 
+            onClick={screenSharing ? stopScreenShare : startScreenShare}
+            className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-lg group relative ${
+              screenSharing 
+                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/40 border border-red-600/40' 
+                : 'bg-[#4cd7f6]/20 text-[#4cd7f6] hover:bg-[#4cd7f6]/40 border border-[#4cd7f6]/40'
+            }`}
+            title={screenSharing ? 'Stop Screen Share' : 'Start Screen Share'}
+          >
+            <span className="material-symbols-outlined text-2xl">{screenSharing ? 'stop_circle' : 'screen_share'}</span>
+            <div className="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-2 bg-[#222a3d] text-[11px] rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-[#464554]/50 shadow-lg">
               {screenSharing ? 'Stop Share' : 'Share Screen'}
             </div>
           </button>
         </div>
-        <div className="flex items-center gap-4 border-r border-[#464554]/20 pr-8">
-          <div className="text-right">
+
+        {/* Timer */}
+        <div className="flex items-center gap-6 border-r border-[#464554]/30 pr-8">
+          <div className="text-center">
             <div className="text-[10px] text-[#c7c4d7]/50 font-bold uppercase tracking-widest">Elapsed</div>
-            <div className="text-sm font-mono font-bold text-[#4cd7f6]">{formatTime(timerSeconds)}</div>
+            <div className="text-lg font-mono font-bold text-[#4cd7f6] mt-1">{formatTime(timerSeconds)}</div>
           </div>
         </div>
-        <button className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border border-red-500/20 shadow-lg shadow-red-500/10">
+
+        {/* Leave Button */}
+        <button className="px-8 py-3 bg-red-600/20 hover:bg-red-600/40 text-red-400 hover:text-red-300 rounded-2xl text-[11px] font-black uppercase tracking-[0.1em] transition-all border border-red-600/40 shadow-lg hover:shadow-red-600/20 font-headline">
           Leave Session
         </button>
       </footer>
