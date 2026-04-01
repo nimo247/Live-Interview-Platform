@@ -59,10 +59,9 @@ export default function RoomPage() {
   const username = searchParams.get('username') || 'Anonymous'
 
   // Core States
-  const [code, setCode] = useState('// Start coding here\n')
-  const [language, setLanguage] = useState('javascript')
-  const [activeTab, setActiveTab] = useState<'code' | 'whiteboard'>('code')
-  const [participants, setParticipants] = useState(1)
+  const [code, setCode] = useState('import math\n\nclass GraphAnalyzer:\n    def __init__(self, nodes):\n        self.nodes = nodes\n        self.adj = {i: [] for i in range(nodes)}\n\n    # Find shortest path using Dijkstra\n    def shortest_path(self, start, end):\n        distances = {node: float(\'inf\') for node in self.nodes}\n        distances[start] = 0\n        priority_queue = [(0, start)]\n')
+  const [language, setLanguage] = useState('python')
+  const [activeTab, setActiveTab] = useState<'code' | 'console'>('code')
   const [connected, setConnected] = useState(false)
   const [notifications, setNotifications] = useState<Notification[]>([])
 
@@ -74,9 +73,12 @@ export default function RoomPage() {
   const [remoteScreenActive, setRemoteScreenActive] = useState(false)
 
   // Chat States
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { sender: 'Sarah Jenkins', text: 'Could you clarify the memory constraints for the adjacency list?', time: '10:23', self: false },
+    { sender: 'You', text: 'Assume standard O(V+E) space is acceptable.', time: '10:24', self: true },
+    { sender: 'Sarah Jenkins', text: 'Perfect, thank you!', time: '10:25', self: false },
+  ])
   const [chatInput, setChatInput] = useState('')
-  const [showChat, setShowChat] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Code Execution States
@@ -87,54 +89,56 @@ export default function RoomPage() {
   const [showStdin, setShowStdin] = useState(false)
 
   // Timer States
-  const [timerSeconds, setTimerSeconds] = useState(0)
-  const [timerRunning, setTimerRunning] = useState(false)
-  const [timerInput, setTimerInput] = useState('45')
-  const [showTimerInput, setShowTimerInput] = useState(false)
+  const [timerSeconds, setTimerSeconds] = useState(1458)
+  const [timerRunning, setTimerRunning] = useState(true)
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const timerSecondsRef = useRef(0)
+  const timerSecondsRef = useRef(1458)
 
   // Drawing States
-  const [brushColor, setBrushColor] = useState('#000000')
+  const [brushColor, setBrushColor] = useState('#c0c1ff')
   const [brushSize, setBrushSize] = useState(3)
-  const [feedback, setFeedback] = useState('')
+  const [feedback, setFeedback] = useState('Candidate is implementing Min-Heap Dijkstra. Suggest asking about handling negative edge weights if performance stays high.')
   const [loadingFeedback, setLoadingFeedback] = useState(false)
-  const [copied, setCopied] = useState(false)
-
-  // Settings & UI States
-  const [showSettings, setShowSettings] = useState(false)
-  const [codeTheme, setCodeTheme] = useState<'light' | 'dark'>('dark')
-  const [fontSize, setFontSize] = useState(14)
 
   // Media Refs
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
-  const remoteAudioRef = useRef<HTMLAudioElement>(null)
   const screenVideoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  // Overlay Refs
-  const localOverlayRef = useRef<HTMLDivElement>(null)
-  const remoteOverlayRef = useRef<HTMLDivElement>(null)
-  const screenOverlayRef = useRef<HTMLDivElement>(null)
-
   // Peer & Stream Refs
   const peerRef = useRef<SimplePeer.Instance | null>(null)
-  const audioPeerRef = useRef<SimplePeer.Instance | null>(null)
-  const screenPeerRef = useRef<SimplePeer.Instance | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
-  const audioStreamRef = useRef<MediaStream | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
 
   // Drawing Refs
   const isDrawing = useRef(false)
   const lastPos = useRef<{ x: number; y: number } | null>(null)
-  const isRemoteChange = useRef(false)
 
   // Auto-scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chatMessages])
+
+  // Timer effect
+  useEffect(() => {
+    if (!timerRunning) return
+    timerIntervalRef.current = setInterval(() => {
+      timerSecondsRef.current += 1
+      setTimerSeconds(timerSecondsRef.current)
+    }, 1000)
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current)
+    }
+  }, [timerRunning])
+
+  // Format time for timer
+  const formatTime = useCallback((secs: number) => {
+    const h = Math.floor(secs / 3600).toString().padStart(2, '0')
+    const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0')
+    const s = (secs % 60).toString().padStart(2, '0')
+    return `${h}:${m}:${s}`
+  }, [])
 
   // Add notification
   const addNotification = useCallback((message: string, type: Notification['type'] = 'info') => {
@@ -144,36 +148,6 @@ export default function RoomPage() {
       setNotifications(prev => prev.filter(n => n.id !== id))
     }, 3000)
   }, [])
-
-  // Format time for timer
-  const formatTime = useCallback((secs: number) => {
-    const m = Math.floor(secs / 60).toString().padStart(2, '0')
-    const s = (secs % 60).toString().padStart(2, '0')
-    return `${m}:${s}`
-  }, [])
-
-  // Start timer
-  const startTimerAt = useCallback((seconds: number) => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current)
-      timerIntervalRef.current = null
-    }
-    timerSecondsRef.current = seconds
-    setTimerSeconds(seconds)
-    setTimerRunning(true)
-    timerIntervalRef.current = setInterval(() => {
-      timerSecondsRef.current -= 1
-      setTimerSeconds(timerSecondsRef.current)
-      if (timerSecondsRef.current <= 0) {
-        clearInterval(timerIntervalRef.current!)
-        timerIntervalRef.current = null
-        setTimerRunning(false)
-        timerSecondsRef.current = 0
-        setTimerSeconds(0)
-        addNotification('Time\'s up!', 'warning')
-      }
-    }, 1000)
-  }, [addNotification])
 
   // Run code
   const runCode = async () => {
@@ -218,33 +192,12 @@ export default function RoomPage() {
   // Copy code to clipboard
   const copyCode = useCallback(() => {
     navigator.clipboard.writeText(code)
-    setCopied(true)
     addNotification('Copied to clipboard!', 'success')
-    setTimeout(() => setCopied(false), 2000)
   }, [code, addNotification])
-
-  // Get AI feedback (placeholder)
-  const getAIFeedback = async () => {
-    setLoadingFeedback(true)
-    try {
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      setFeedback('Your code demonstrates strong algorithmic thinking with proper use of data structures.')
-      addNotification('AI feedback generated', 'success')
-    } catch (e) {
-      addNotification('Failed to get AI feedback', 'error')
-    } finally {
-      setLoadingFeedback(false)
-    }
-  }
 
   // Toggle mute
   const toggleMute = useCallback(() => {
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getAudioTracks().forEach(track => {
-        track.enabled = muted
-      })
-      setMuted(!muted)
-    }
+    setMuted(!muted)
   }, [muted])
 
   // Start video call
@@ -287,11 +240,7 @@ export default function RoomPage() {
         screenVideoRef.current.srcObject = stream
       }
       setScreenSharing(true)
-      if (screenOverlayRef.current) {
-        screenOverlayRef.current.style.opacity = '0'
-      }
       addNotification('Screen sharing started', 'success')
-
       stream.getVideoTracks()[0].onended = () => {
         stopScreenShare()
       }
@@ -307,495 +256,321 @@ export default function RoomPage() {
       screenVideoRef.current.srcObject = null
     }
     setScreenSharing(false)
-    if (screenOverlayRef.current) {
-      screenOverlayRef.current.style.opacity = '1'
-    }
     addNotification('Screen sharing stopped', 'info')
   }, [addNotification])
 
-  // Clear canvas
-  const clearCanvas = useCallback(() => {
-    if (canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d')
-      if (ctx) {
-        ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
-      }
-    }
-  }, [])
-
-  // Handle drawing
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!canvasRef.current) return
-    const rect = canvasRef.current.getBoundingClientRect()
-    lastPos.current = {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
-    }
-    isDrawing.current = true
-  }
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing.current || !canvasRef.current || !lastPos.current) return
-    const rect = canvasRef.current.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
-    const ctx = canvasRef.current.getContext('2d')
-    if (!ctx) return
-
-    ctx.strokeStyle = brushColor
-    ctx.lineWidth = brushSize
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.beginPath()
-    ctx.moveTo(lastPos.current.x, lastPos.current.y)
-    ctx.lineTo(x, y)
-    ctx.stroke()
-
-    lastPos.current = { x, y }
-  }
-
-  const handleMouseUp = () => {
-    isDrawing.current = false
-    lastPos.current = null
-  }
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === 'Enter') {
-          e.preventDefault()
-          runCode()
-        } else if (e.key === 's') {
-          e.preventDefault()
-          downloadCode()
-        } else if (e.key === 'c' && e.shiftKey) {
-          e.preventDefault()
-          copyCode()
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [runCode, downloadCode, copyCode])
-
-  // Timer effect
-  useEffect(() => {
-    return () => {
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current)
-      }
-    }
-  }, [])
-
-  // Memoized color palette
-  const colors = useMemo(() => ['#000000', '#FFFFFF', '#FF6B6B', '#4ECDC4', '#FFE66D', '#95E1D3'], [])
-
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-50 to-slate-100 overflow-hidden font-sans">
-      {/* ═══ HEADER ═══ */}
-      <header className="bg-white/80 backdrop-blur-xl border-b border-slate-200/50 px-6 py-3 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">IE</span>
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Interview Elite</h1>
-        </div>
+    <div className="h-screen flex flex-col bg-[#0b1326] text-on-surface selection:bg-primary/30 min-h-screen overflow-hidden font-body">
+      <style>{`
+        body { font-family: 'Inter', sans-serif; }
+        .font-headline { font-family: 'Space Grotesk', sans-serif; }
+        .glass-panel {
+          background: rgba(34, 42, 61, 0.6);
+          backdrop-filter: blur(12px);
+        }
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #31394d; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #464554; }
+        .slate-surface { background: #0b1326; }
+        .slate-container-low { background: #131b2e; }
+        .slate-container-high { background: #222a3d; }
+      `}</style>
 
+      {/* ═══ TOP NAV BAR ═══ */}
+      <nav className="fixed top-0 w-full z-50 bg-[#0b1326]/80 backdrop-blur-xl shadow-[0px_20px_40px_rgba(6,14,32,0.4)] flex justify-between items-center px-8 h-16 border-b border-[#464554]/10">
+        <div className="flex items-center gap-12">
+          <div className="text-xl font-bold tracking-tighter text-[#c0c1ff] font-headline">InterviewElite</div>
+          <div className="hidden md:flex gap-8 items-center font-headline text-sm tracking-wide">
+            <a className="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors" href="#">Dashboard</a>
+            <a className="text-[#c0c1ff] border-b-2 border-[#c0c1ff] pb-1" href="#">Sessions</a>
+            <a className="text-[#c7c4d7] hover:text-[#c0c1ff] transition-colors" href="#">Insights</a>
+          </div>
+        </div>
         <div className="flex items-center gap-4">
-          <button onClick={() => setShowTimerInput(!showTimerInput)} className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${timerRunning ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-            ⏱ {formatTime(timerSeconds)}
-          </button>
-          <button onClick={() => setShowSettings(!showSettings)} className="p-2 hover:bg-slate-100 rounded-lg transition-all">
-            <span className="material-symbols-outlined">settings</span>
-          </button>
-          <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-blue-500 rounded-full" />
+          <button className="px-4 py-1.5 rounded-lg text-sm font-medium text-[#c7c4d7] hover:bg-[#31394d]/50 transition-all active:scale-95">End Session</button>
+          <button className="px-5 py-1.5 rounded-lg text-sm font-bold bg-[#8083ff] text-[#0d0096] shadow-lg shadow-[#8083ff]/20 transition-all active:scale-95">Go Live</button>
+          <div className="w-8 h-8 rounded-full overflow-hidden border border-[#464554]/30 ml-2 bg-gradient-to-br from-[#4cd7f6] to-[#c0c1ff]" />
         </div>
-      </header>
-
-      {/* ═══ SETTINGS PANEL ═══ */}
-      {showSettings && (
-        <div className="absolute top-16 right-6 bg-white rounded-xl shadow-2xl p-6 w-80 z-40 border border-slate-200">
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-            <span className="material-symbols-outlined">settings</span>Settings
-          </h3>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-semibold text-slate-700 block mb-2">Code Theme</label>
-              <div className="flex gap-2">
-                {(['light', 'dark'] as const).map(theme => (
-                  <button
-                    key={theme}
-                    onClick={() => setCodeTheme(theme)}
-                    className={`flex-1 py-2 px-3 rounded-lg font-medium transition-all ${codeTheme === theme ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
-                  >
-                    {theme.charAt(0).toUpperCase() + theme.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="text-sm font-semibold text-slate-700 block mb-2">Font Size: {fontSize}px</label>
-              <input
-                type="range"
-                min="10"
-                max="20"
-                value={fontSize}
-                onChange={(e) => setFontSize(Number(e.target.value))}
-                className="w-full"
-              />
-            </div>
-            <button
-              onClick={() => setShowSettings(false)}
-              className="w-full py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-all"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ═══ NOTIFICATIONS ═══ */}
-      <div className="fixed top-20 right-6 z-50 space-y-2">
-        {notifications.map(notif => (
-          <div
-            key={notif.id}
-            className={`px-4 py-3 rounded-lg shadow-lg text-sm font-medium animate-in fade-in slide-in-from-right-4 ${
-              notif.type === 'success' ? 'bg-green-100 text-green-800' :
-              notif.type === 'error' ? 'bg-red-100 text-red-800' :
-              notif.type === 'warning' ? 'bg-yellow-100 text-yellow-800' :
-              'bg-blue-100 text-blue-800'
-            }`}
-          >
-            {notif.message}
-          </div>
-        ))}
-      </div>
+      </nav>
 
       {/* ═══ MAIN CONTENT ═══ */}
-      <main className="flex-1 grid grid-cols-12 gap-0 overflow-hidden">
-        {/* LEFT SIDEBAR */}
-        <aside className="col-span-2 bg-white border-r border-slate-200/50 flex flex-col overflow-hidden">
-          <nav className="flex-1 overflow-y-auto p-4 space-y-2">
-            {[
-              { icon: 'code', label: 'Editor', tab: 'code' },
-              { icon: 'edit', label: 'Whiteboard', tab: 'whiteboard' },
-              { icon: 'chat', label: 'Chat', action: () => setShowChat(!showChat) },
-              { icon: 'terminal', label: 'Terminal', active: false }
-            ].map((item, i) => (
-              <button
-                key={i}
-                onClick={() => {
-                  if ('tab' in item) setActiveTab(item.tab as any)
-                  if ('action' in item && item.action) item.action()
-                }}
-                className={`w-full text-left px-4 py-3 rounded-lg font-medium text-sm transition-all flex items-center gap-3 ${
-                  activeTab === item.tab || showChat
-                    ? 'bg-blue-50 text-blue-700 border-l-4 border-blue-600'
-                    : 'text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                <span className="material-symbols-outlined text-lg">{item.icon}</span>
-                {item.label}
-              </button>
-            ))}
+      <main className="flex-1 flex gap-0 pt-16 overflow-hidden">
+        
+        {/* LEFT SIDEBAR - NAVIGATION & CONSOLE */}
+        <aside className="w-64 bg-[#131b2e] flex flex-col border-r border-[#464554]/5 overflow-hidden">
+          {/* Toolset Header */}
+          <div className="px-6 py-6 border-b border-[#464554]/10">
+            <h3 className="font-headline text-xs font-semibold uppercase tracking-[0.05em] text-[#4cd7f6]">Interview Toolset</h3>
+            <p className="text-[10px] text-[#c7c4d7]/60 font-medium tracking-wider">Technical Session v2.4</p>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+            <a href="#" className="flex items-center gap-3 px-4 py-3 bg-[#222a3d]/60 text-[#4cd7f6] border-r-2 border-[#4cd7f6] font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300 rounded-r-lg">
+              <span className="material-symbols-outlined text-lg">code</span>
+              Code Editor
+            </a>
+            <a href="#" className="flex items-center gap-3 px-4 py-3 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d] hover:opacity-100 font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300">
+              <span className="material-symbols-outlined text-lg">videocam</span>
+              Video
+            </a>
+            <a href="#" className="flex items-center gap-3 px-4 py-3 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d] hover:opacity-100 font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300">
+              <span className="material-symbols-outlined text-lg">psychology</span>
+              AI Insights
+            </a>
+            <a href="#" className="flex items-center gap-3 px-4 py-3 text-[#c7c4d7] opacity-70 hover:bg-[#222a3d] hover:opacity-100 font-headline text-xs font-semibold uppercase tracking-[0.05em] transition-all duration-300">
+              <span className="material-symbols-outlined text-lg">architecture</span>
+              Whiteboard
+            </a>
           </nav>
+
+          {/* Console Output */}
+          <div className="flex-1 flex flex-col border-t border-[#464554]/10 overflow-hidden">
+            <div className="px-6 py-4">
+              <h4 className="text-xs font-bold text-[#c0c1ff] uppercase tracking-widest">Session Tools</h4>
+            </div>
+            <div className="flex-1 px-4 py-3 overflow-y-auto space-y-2 text-[11px] font-mono text-[#c7c4d7]/70">
+              <div className="text-green-400">✓ graph_analyzer.py initialized...</div>
+              <div className="text-green-400">✓ Running test cases (0/4)</div>
+              <div className="text-yellow-400">⚠ Unused variable 'math' on line 1</div>
+              <div className="text-green-400">✓ Solution compiling...</div>
+            </div>
+          </div>
         </aside>
 
-        {/* EDITOR SECTION */}
-        <section className={`${showChat ? 'col-span-7' : 'col-span-8'} bg-white border-r border-slate-200/50 flex flex-col overflow-hidden transition-all`}>
+        {/* CENTER - CODE EDITOR */}
+        <section className="flex-1 flex flex-col overflow-hidden bg-[#0b1326]">
           {/* Editor Toolbar */}
-          <div className="border-b border-slate-200/50 p-4 flex items-center justify-between bg-slate-50">
+          <div className="border-b border-[#464554]/10 px-6 py-3 flex items-center justify-between bg-[#131b2e]/40">
             <div className="flex items-center gap-3">
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-                className="px-3 py-2 border border-slate-300 rounded-lg bg-white font-medium text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {LANGUAGE_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-1 bg-[#222a3d]/50 px-3 py-1.5 rounded-lg border border-[#464554]/20">
+                <span className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest">solution.py</span>
+                <span className="text-[#4cd7f6] text-xs font-bold ml-2">Python 3.10</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                onClick={runCode}
-                disabled={running}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold text-sm hover:bg-green-700 disabled:opacity-50 transition-all active:scale-95 flex items-center gap-2"
-              >
-                <span className="material-symbols-outlined">{running ? 'hourglass_empty' : 'play_arrow'}</span>
-                {running ? 'Running...' : 'Run'}
+              <button onClick={runCode} disabled={running} className="flex items-center gap-2 px-4 py-1.5 bg-[#4cd7f6] text-[#001f26] rounded-lg font-bold text-xs hover:brightness-110 disabled:opacity-50 transition-all active:scale-95">
+                <span className="material-symbols-outlined text-base">{running ? 'hourglass_empty' : 'play_arrow'}</span>
+                {running ? 'Running...' : 'Run Code'}
               </button>
-              <button
-                onClick={copyCode}
-                className={`px-3 py-2 rounded-lg font-medium text-sm transition-all ${copied ? 'bg-green-100 text-green-700' : 'bg-slate-200 text-slate-700 hover:bg-slate-300'}`}
-              >
-                <span className="material-symbols-outlined text-base">{copied ? 'check' : 'content_copy'}</span>
+              <button onClick={copyCode} className="px-3 py-1.5 bg-[#222a3d]/50 text-[#c7c4d7] rounded-lg hover:bg-[#222a3d] transition-all border border-[#464554]/20">
+                <span className="material-symbols-outlined">content_copy</span>
               </button>
-              <button
-                onClick={downloadCode}
-                className="px-3 py-2 bg-slate-200 text-slate-700 rounded-lg font-medium text-sm hover:bg-slate-300 transition-all"
-              >
+              <button onClick={downloadCode} className="px-3 py-1.5 bg-[#222a3d]/50 text-[#c7c4d7] rounded-lg hover:bg-[#222a3d] transition-all border border-[#464554]/20">
                 <span className="material-symbols-outlined">download</span>
               </button>
             </div>
           </div>
 
-          {/* Editor */}
+          {/* Code Editor */}
           <div className="flex-1 overflow-hidden">
-            {activeTab === 'code' ? (
-              <MonacoEditor
-                height="100%"
-                language={language}
-                value={code}
-                onChange={(value) => setCode(value || '')}
-                theme={codeTheme === 'dark' ? 'vs-dark' : 'vs-light'}
-                options={{
-                  fontSize,
-                  minimap: { enabled: false },
-                  wordWrap: 'on',
-                  scrollBeyondLastLine: false,
-                  formatOnPaste: true,
-                  formatOnType: true,
-                }}
-              />
-            ) : (
-              <canvas
-                ref={canvasRef}
-                onMouseDown={handleMouseDown}
-                onMouseMove={handleMouseMove}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseUp}
-                width={window.innerWidth}
-                height={window.innerHeight}
-                className="w-full h-full bg-white cursor-crosshair"
-              />
-            )}
+            <MonacoEditor
+              height="100%"
+              language={language}
+              value={code}
+              onChange={(value) => setCode(value || '')}
+              theme="vs-dark"
+              options={{
+                fontSize: 13,
+                minimap: { enabled: false },
+                wordWrap: 'on',
+                scrollBeyondLastLine: false,
+                formatOnPaste: true,
+                formatOnType: true,
+                padding: { top: 16, bottom: 16 },
+                fontFamily: 'Fira Code, monospace',
+                background: '#0b1326',
+              }}
+            />
           </div>
 
           {/* Output Panel */}
           {outputOpen && runResult && (
-            <div className="border-t border-slate-200/50 bg-slate-900 text-white p-4 max-h-64 overflow-y-auto font-mono text-xs">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold">Output</h3>
-                <button
-                  onClick={() => setOutputOpen(false)}
-                  className="text-slate-400 hover:text-white"
-                >
-                  <span className="material-symbols-outlined">close</span>
+            <div className="border-t border-[#464554]/10 bg-[#060e20] p-4 max-h-40 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-[#c0c1ff] uppercase tracking-widest">Output</h3>
+                <button onClick={() => setOutputOpen(false)} className="text-[#c7c4d7]/60 hover:text-[#c0c1ff]">
+                  <span className="material-symbols-outlined text-sm">close</span>
                 </button>
               </div>
-              {runResult.stdout && (
-                <div className="mb-3">
-                  <p className="text-green-400 font-semibold mb-1">STDOUT:</p>
-                  <p className="text-slate-300 whitespace-pre-wrap">{runResult.stdout}</p>
-                </div>
-              )}
-              {runResult.stderr && (
-                <div className="mb-3">
-                  <p className="text-red-400 font-semibold mb-1">STDERR:</p>
-                  <p className="text-slate-300 whitespace-pre-wrap">{runResult.stderr}</p>
-                </div>
-              )}
-              {runResult.error && (
-                <p className="text-red-400">{runResult.error}</p>
-              )}
+              <div className="space-y-2 text-[11px] font-mono">
+                {runResult.stdout && (
+                  <div>
+                    <p className="text-[#4cd7f6] font-semibold mb-1">STDOUT:</p>
+                    <p className="text-[#c7c4d7]/70 whitespace-pre-wrap">{runResult.stdout}</p>
+                  </div>
+                )}
+                {runResult.stderr && (
+                  <div>
+                    <p className="text-[#ffb4ab] font-semibold mb-1">STDERR:</p>
+                    <p className="text-[#c7c4d7]/70 whitespace-pre-wrap">{runResult.stderr}</p>
+                  </div>
+                )}
+                {runResult.error && <p className="text-[#ffb4ab]">{runResult.error}</p>}
+              </div>
             </div>
           )}
         </section>
 
-        {/* RIGHT SIDEBAR - VIDEO & AI */}
-        <section className={`${showChat ? 'col-span-3' : 'col-span-2'} bg-gradient-to-b from-slate-50 to-slate-100 border-l border-slate-200/50 p-4 flex flex-col gap-4 overflow-y-auto transition-all`}>
-          {/* Video Feeds */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="relative bg-slate-800 rounded-xl overflow-hidden shadow-lg group" style={{ aspectRatio: '1' }}>
-              <video
-                ref={localVideoRef}
-                autoPlay
-                muted
-                playsInline
-                className="w-full h-full object-cover"
-              />
-              <div
-                ref={localOverlayRef}
-                className="absolute inset-0 flex items-center justify-center bg-slate-900/90 transition-opacity"
-                style={{ opacity: videoActive ? 0 : 1 }}
-              >
-                <span className="material-symbols-outlined text-white text-4xl">videocam_off</span>
-              </div>
-              <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/50 backdrop-blur-sm rounded text-xs text-white font-bold">YOU</div>
-            </div>
-            <div className="relative bg-slate-800 rounded-xl overflow-hidden shadow-lg group" style={{ aspectRatio: '1' }}>
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover"
-              />
-              <div
-                ref={remoteOverlayRef}
-                className="absolute inset-0 flex items-center justify-center bg-slate-900/90 transition-opacity"
-              >
-                <span className="material-symbols-outlined text-white text-4xl">person</span>
-              </div>
-              <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/50 backdrop-blur-sm rounded text-xs text-white font-bold">INTERVIEWER</div>
-            </div>
-          </div>
-
-          {/* Screen Share */}
-          <div className="relative bg-slate-800 rounded-xl overflow-hidden shadow-lg" style={{ aspectRatio: '16/9' }}>
-            <video
-              ref={screenVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-contain bg-black"
-            />
-            <div
-              ref={screenOverlayRef}
-              className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 transition-opacity"
-              style={{ opacity: 1, background: '#1e293b' }}
-            >
-              <span className="material-symbols-outlined text-4xl mb-2">desktop_mac</span>
-              <span className="text-xs font-medium">No screen share</span>
-            </div>
-            {screenSharing && (
-              <div className="absolute top-2 right-2 bg-red-600 text-white text-xs px-3 py-1 rounded-full font-bold z-20 flex items-center gap-2 animate-pulse">
-                <span className="w-1.5 h-1.5 bg-white rounded-full" />LIVE
-              </div>
-            )}
-          </div>
-
-          {/* AI Insights */}
-          <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200">
-            <h3 className="font-bold text-sm text-blue-600 flex items-center gap-2 mb-2 uppercase tracking-wide">
-              <span className="material-symbols-outlined text-lg">auto_awesome</span>AI Insights
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed mb-3">
-              Real-time performance metrics and technical feedback.
-            </p>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-3 rounded-lg border border-blue-200">
-                <span className="text-[9px] font-bold text-blue-700 block mb-1 uppercase tracking-wider">Efficiency</span>
-                <span className="text-lg font-black text-blue-900">92%</span>
-              </div>
-              <div className="bg-gradient-to-br from-green-50 to-green-100 p-3 rounded-lg border border-green-200">
-                <span className="text-[9px] font-bold text-green-700 block mb-1 uppercase tracking-wider">Score</span>
-                <span className="text-lg font-black text-green-900">88</span>
-              </div>
-            </div>
-            <button
-              onClick={getAIFeedback}
-              disabled={loadingFeedback}
-              className="w-full py-2 bg-blue-600 text-white rounded-lg font-semibold text-xs hover:bg-blue-700 disabled:opacity-50 transition-all active:scale-95"
-            >
-              {loadingFeedback ? '⏳ Analyzing...' : '✨ Get Feedback'}
-            </button>
-          </div>
-        </section>
-
-        {/* CHAT SIDEBAR */}
-        {showChat && (
-          <aside className="col-span-3 bg-white border-r border-slate-200/50 flex flex-col overflow-hidden">
-            <div className="border-b border-slate-200/50 p-4">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <span className="material-symbols-outlined">chat</span>Discussion
-              </h3>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {chatMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.self ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className={`max-w-xs px-4 py-2 rounded-lg text-sm ${
-                      msg.self
-                        ? 'bg-blue-600 text-white rounded-br-none'
-                        : 'bg-slate-100 text-slate-900 rounded-bl-none'
-                    }`}
-                  >
-                    {msg.text}
-                  </div>
+        {/* RIGHT SIDEBAR - VIDEOS & INSIGHTS */}
+        <aside className="w-96 bg-[#131b2e] border-l border-[#464554]/5 flex flex-col overflow-hidden">
+          {/* Videos Section */}
+          <div className="px-6 py-6 space-y-4 border-b border-[#464554]/10">
+            {/* Candidate Video */}
+            <div className="relative rounded-xl overflow-hidden aspect-video shadow-xl border border-[#464554]/20 bg-[#0b1326]">
+              <div className="w-full h-full bg-gradient-to-br from-[#4cd7f6]/20 to-transparent flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-orange-400 to-orange-600 mx-auto mb-3 flex items-center justify-center text-4xl">👨</div>
+                  <p className="text-[#c7c4d7] text-sm font-semibold">Sarah Jenkins</p>
                 </div>
-              ))}
-              <div ref={chatEndRef} />
+              </div>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-80" />
+              <div className="absolute bottom-3 left-3 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[10px] font-bold text-white tracking-widest uppercase">Sarah Jenkins (Candidate)</span>
+              </div>
+              <div className="absolute top-3 right-3">
+                <div className="glass-panel p-1.5 rounded-lg text-white/90 border border-white/10">
+                  <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>mic</span>
+                </div>
+              </div>
             </div>
-            <div className="border-t border-slate-200/50 p-4 flex gap-2">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' && chatInput.trim()) {
-                    setChatMessages([...chatMessages, { sender: username, text: chatInput, time: new Date().toLocaleTimeString(), self: true }])
-                    setChatInput('')
-                  }
-                }}
-                placeholder="Type a message..."
-                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <button className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all">
-                <span className="material-symbols-outlined">send</span>
-              </button>
+
+            {/* Interviewer Video */}
+            <div className="relative rounded-xl overflow-hidden aspect-video shadow-xl border border-[#464554]/20 bg-[#0b1326]">
+              <div className="w-full h-full bg-gradient-to-br from-teal-400/20 to-transparent flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 mx-auto mb-3 flex items-center justify-center text-4xl">👤</div>
+                  <p className="text-[#c7c4d7] text-sm font-semibold">David Chen</p>
+                </div>
+              </div>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-80" />
+              <div className="absolute bottom-3 left-3">
+                <span className="text-[10px] font-bold text-white tracking-widest uppercase">David Chen (You)</span>
+              </div>
+              <div className="absolute top-3 right-3">
+                <div className="glass-panel p-1.5 rounded-lg text-white/90 border border-white/10">
+                  <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>mic</span>
+                </div>
+              </div>
             </div>
-          </aside>
-        )}
+          </div>
+
+          {/* Session Intelligence */}
+          <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+            <div className="border-b border-[#464554]/10 pb-4">
+              <div className="flex items-center justify-between">
+                <h4 className="font-headline text-sm font-bold tracking-tight text-[#c0c1ff]">Session Intelligence</h4>
+                <span className="px-2 py-0.5 rounded-full bg-[#4cd7f6]/10 text-[#4cd7f6] text-[9px] font-black uppercase tracking-tighter border border-[#4cd7f6]/20">Real-time</span>
+              </div>
+            </div>
+
+            {/* Metrics */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-4 rounded-xl bg-[#222a3d]/40 border border-[#464554]/10">
+                <div className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest mb-1">Efficiency</div>
+                <div className="text-2xl font-headline font-bold text-[#4cd7f6]">92<span className="text-xs text-[#c7c4d7]/40 ml-1">%</span></div>
+              </div>
+              <div className="p-4 rounded-xl bg-[#222a3d]/40 border border-[#464554]/10">
+                <div className="text-[10px] text-[#c7c4d7]/60 uppercase font-bold tracking-widest mb-1">Clarity</div>
+                <div className="text-2xl font-headline font-bold text-[#c0c1ff]">85<span className="text-xs text-[#c7c4d7]/40 ml-1">%</span></div>
+              </div>
+            </div>
+
+            {/* Chat */}
+            <div className="border border-[#464554]/10 rounded-xl bg-[#060e20]/50 overflow-hidden h-64 flex flex-col">
+              <div className="p-3 border-b border-[#464554]/10 bg-[#131b2e] flex justify-between items-center">
+                <span className="text-[10px] font-bold text-[#c7c4d7] uppercase tracking-widest flex items-center gap-2">
+                  <span className="material-symbols-outlined text-sm">chat</span>
+                  Session Chat
+                </span>
+                <span className="w-2 h-2 rounded-full bg-green-500" />
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className={`flex flex-col gap-1 ${msg.self ? 'items-end' : 'items-start'}`}>
+                    <span className="text-[9px] text-[#c7c4d7]/60 font-bold">{msg.sender}</span>
+                    <div className={`${msg.self ? 'bg-[#4cd7f6]/10 border-[#4cd7f6]/20 text-on-surface' : 'bg-[#222a3d] border-[#464554]/20 text-[#c7c4d7]/90'} px-3 py-2 rounded-2xl ${msg.self ? 'rounded-tr-none' : 'rounded-tl-none'} text-[11px] max-w-[85%] border`}>
+                      {msg.text}
+                    </div>
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+              <div className="p-2 border-t border-[#464554]/10 bg-[#131b2e]">
+                <div className="relative">
+                  <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Send a message..." className="w-full bg-[#060e20] border-none rounded-lg py-2 pl-3 pr-10 text-xs focus:ring-1 focus:ring-[#4cd7f6]/50 placeholder:text-[#c7c4d7]/30" />
+                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-[#4cd7f6] hover:text-[#acedff] transition-colors">
+                    <span className="material-symbols-outlined text-lg">send</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Strategy Analysis */}
+            <div className="glass-panel p-4 rounded-xl border border-[#464554]/10">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="material-symbols-outlined text-[#4cd7f6] text-base">lightbulb</span>
+                <span className="text-[10px] font-bold text-on-surface tracking-widest uppercase">Strategy Analysis</span>
+              </div>
+              <p className="text-[11px] text-[#c7c4d7] leading-relaxed">
+                Candidate is implementing <span className="text-[#4cd7f6] font-semibold">Min-Heap Dijkstra</span>. Suggest asking about handling negative edge weights if performance stays high.
+              </p>
+            </div>
+
+            {/* Transcript */}
+            <div className="pb-2">
+              <div className="flex items-center justify-between text-[10px] font-bold text-[#c7c4d7]/40 uppercase tracking-[0.2em] mb-4">
+                <span>Live Transcript</span>
+                <span className="material-symbols-outlined text-xs">more_horiz</span>
+              </div>
+              <div className="space-y-3">
+                <div className="flex gap-3">
+                  <div className="w-6 h-6 rounded-lg bg-[#222a3d] flex-shrink-0 flex items-center justify-center text-[9px] font-bold text-[#c7c4d7]">SJ</div>
+                  <p className="text-[10px] text-[#c7c4d7]/70 leading-tight">"Actually, looking at the constraints, I might need to optimize the priority queue handling..."</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
       </main>
 
-      {/* ═══ BOTTOM CONTROL BAR ═══ */}
-      <nav className="bg-white border-t border-slate-200/50 px-6 py-4 flex items-center justify-center gap-8 shadow-lg">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={toggleMute}
-            disabled={!micReady}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
-              !micReady
-                ? 'opacity-50 cursor-not-allowed text-slate-400'
-                : muted
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
+      {/* ═══ FLOATING CONTROL BAR ═══ */}
+      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 glass-panel px-6 py-3 rounded-2xl border border-[#464554]/20 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] flex items-center gap-8">
+        <div className="flex items-center gap-2 border-r border-[#464554]/20 pr-8">
+          <button onClick={toggleMute} className="w-10 h-10 rounded-xl flex items-center justify-center text-[#c7c4d7] hover:text-white hover:bg-[#31394d] transition-all group relative">
             <span className="material-symbols-outlined">{muted ? 'mic_off' : 'mic'}</span>
-            {muted ? 'Mic Off' : 'Mic On'}
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#222a3d] text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+              {muted ? 'Unmute' : 'Mute'}
+            </div>
           </button>
-
-          <button
-            onClick={videoActive ? stopVideo : startVideoCall}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
-              videoActive
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
+          <button onClick={videoActive ? stopVideo : startVideoCall} className="w-10 h-10 rounded-xl flex items-center justify-center text-[#c7c4d7] hover:text-white hover:bg-[#31394d] transition-all group relative">
             <span className="material-symbols-outlined">{videoActive ? 'videocam_off' : 'videocam'}</span>
-            {videoActive ? 'Cam Off' : 'Cam On'}
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#222a3d] text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+              {videoActive ? 'Stop Camera' : 'Start Camera'}
+            </div>
           </button>
-
-          <button
-            onClick={screenSharing ? stopScreenShare : startScreenShare}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
-              screenSharing
-                ? 'bg-red-600 text-white hover:bg-red-700'
-                : 'bg-blue-600 text-white hover:bg-blue-700'
-            }`}
-          >
+          <button onClick={screenSharing ? stopScreenShare : startScreenShare} className="w-10 h-10 rounded-xl flex items-center justify-center text-[#c7c4d7] hover:text-white hover:bg-[#31394d] transition-all group relative">
             <span className="material-symbols-outlined">{screenSharing ? 'stop_circle' : 'screen_share'}</span>
-            {screenSharing ? 'Stop Share' : 'Share'}
-          </button>
-
-          <button className="flex items-center gap-2 px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
-            <span className="material-symbols-outlined">radio_button_checked</span>
-            Record
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-2 py-1 bg-[#222a3d] text-[10px] rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap">
+              {screenSharing ? 'Stop Share' : 'Share Screen'}
+            </div>
           </button>
         </div>
-
-        <div className="w-px h-8 bg-slate-200" />
-
-        <button className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg font-semibold text-sm hover:bg-red-700 transition-all active:scale-95">
-          <span className="material-symbols-outlined">call_end</span>
-          Leave Call
+        <div className="flex items-center gap-4 border-r border-[#464554]/20 pr-8">
+          <div className="text-right">
+            <div className="text-[10px] text-[#c7c4d7]/50 font-bold uppercase tracking-widest">Elapsed</div>
+            <div className="text-sm font-mono font-bold text-[#4cd7f6]">{formatTime(timerSeconds)}</div>
+          </div>
+        </div>
+        <button className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border border-red-500/20 shadow-lg shadow-red-500/10">
+          Leave Session
         </button>
-      </nav>
+      </footer>
     </div>
   )
 }
