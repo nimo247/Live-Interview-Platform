@@ -30,6 +30,11 @@ interface Notification {
   type: 'success' | 'error' | 'info' | 'warning'
 }
 
+type DisplayMediaStreamOptions = {
+  video: { width?: { ideal?: number }; height?: { ideal?: number } }
+  audio: boolean
+}
+
 const EXTENSIONS: Record<string, string> = {
   javascript: 'js', typescript: 'ts', python: 'py',
   java: 'java', cpp: 'cpp', go: 'go', rust: 'rs', c: 'c',
@@ -274,9 +279,9 @@ export default function RoomPage() {
   const startScreenShare = async () => {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { cursor: 'always' },
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false
-      })
+      } as DisplayMediaStreamOptions)
       screenStreamRef.current = stream
       if (screenVideoRef.current) {
         screenVideoRef.current.srcObject = stream
