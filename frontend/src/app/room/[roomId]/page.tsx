@@ -52,6 +52,7 @@ export default function RoomPage() {
   const [copied, setCopied] = useState(false)
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
+  const [showChat, setShowChat] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   const [runResult, setRunResult] = useState<RunResult | null>(null)
@@ -95,7 +96,8 @@ export default function RoomPage() {
     setOutputOpen(true)
     setRunResult(null)
     try {
-      const res = await fetch('http://192.168.1.35:8000/rooms/execute', {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const res = await fetch(`${backendUrl}/rooms/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language, stdin: stdinInput })
@@ -426,7 +428,8 @@ export default function RoomPage() {
   const getAIFeedback = async () => {
     setFeedback(''); setLoadingFeedback(true)
     try {
-      const res = await fetch('http://192.168.1.35:8000/rooms/ai-feedback', {
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const res = await fetch(`${backendUrl}/rooms/ai-feedback`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code, language })
       })
@@ -517,15 +520,69 @@ export default function RoomPage() {
               <span className="material-symbols-outlined">terminal</span>
               <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Terminal</span>
             </button>
-            <button className="w-full flex flex-col items-center gap-1 py-3 text-on-surface-variant hover:text-brand-indigo transition-all duration-300">
+            <button onClick={() => setShowChat(!showChat)} className={`w-full flex flex-col items-center gap-1 py-3 transition-all duration-300 ${showChat ? 'text-brand-indigo border-r-4 border-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
               <span className="material-symbols-outlined">forum</span>
               <span className="font-headline font-semibold text-[10px] uppercase tracking-[0.1em]">Chat</span>
             </button>
           </nav>
         </aside>
 
+        {/* ═══ CHAT PANEL (Toggleable) ═══ */}
+        {showChat && (
+          <div className="fixed left-20 top-16 bottom-16 w-72 bg-white border-r border-outline-variant/10 flex flex-col z-30 shadow-lg">
+            {/* Chat Header */}
+            <div className="p-4 border-b border-outline-variant/10">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-headline font-black text-lg text-brand-indigo">Chat</h3>
+                <button onClick={() => setShowChat(false)} className="text-on-surface-variant hover:text-brand-indigo">
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+              <p className="text-xs text-on-surface-variant">Real-time messaging</p>
+            </div>
+
+            {/* Chat Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {chatMessages.length === 0 && (
+                <div className="text-center text-on-surface-variant text-xs mt-8">
+                  <p>No messages yet. Start chatting! 💬</p>
+                </div>
+              )}
+              {chatMessages.map((msg, i) => (
+                <div key={i} className={`flex flex-col gap-1 ${msg.self ? 'items-end' : 'items-start'}`}>
+                  <span className="text-xs text-on-surface-variant font-bold">{msg.self ? 'You' : msg.sender}</span>
+                  <div className={`max-w-[85%] px-4 py-2 rounded-lg text-sm leading-snug break-words ${msg.self ? 'bg-brand-indigo text-white rounded-br-none' : 'bg-surface-container-low text-on-surface rounded-bl-none'}`}>
+                    {msg.text}
+                  </div>
+                  <span className="text-[10px] text-on-surface-variant">{msg.time}</span>
+                </div>
+              ))}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Chat Input */}
+            <div className="p-4 border-t border-outline-variant/10 flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                placeholder="Type message..."
+                className="flex-1 bg-surface-container-low border border-outline-variant/20 rounded-lg text-sm px-3 py-2 focus:outline-none focus:border-brand-indigo focus:ring-2 focus:ring-brand-indigo/20"
+              />
+              <button
+                onClick={sendMessage}
+                disabled={!chatInput.trim()}
+                className="bg-brand-indigo text-white px-4 py-2 rounded-lg font-headline font-bold text-xs uppercase transition-all hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ═══ CENTER: EDITOR ═══ */}
-        <section className="col-span-8 p-6 bg-surface-container-low overflow-hidden flex flex-col gap-4">
+        <section className={`${showChat ? 'col-span-7 ml-72' : 'col-span-8'} p-6 bg-surface-container-low overflow-hidden flex flex-col gap-4 transition-all`}>
           {/* Toolbar */}
           <div className="flex justify-between items-center px-4 py-2">
             <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-outline-variant/10">
@@ -609,7 +666,7 @@ export default function RoomPage() {
         </section>
 
         {/* ═══ RIGHT SIDEBAR: VIDEO & AI ═══ */}
-        <section className="col-span-4 bg-surface-container-low border-l border-outline-variant/10 p-6 flex flex-col gap-6 overflow-y-auto">
+        <section className={`${showChat ? 'col-span-3' : 'col-span-4'} bg-surface-container-low border-l border-outline-variant/10 p-6 flex flex-col gap-6 overflow-y-auto transition-all`}>
           {/* Video Feeds */}
           <div className="grid grid-cols-2 gap-4">
             <div className="relative bg-on-surface rounded-xl overflow-hidden editorial-shadow group" style={{ aspectRatio: '1' }}>
@@ -701,27 +758,34 @@ export default function RoomPage() {
       {/* ═══ BOTTOM NAV ═══ */}
       <nav className="fixed bottom-0 left-0 w-full flex justify-center items-center space-x-12 px-12 z-50 bg-white/90 backdrop-blur-2xl h-16 border-t border-outline-variant/10">
         <div className="flex items-center space-x-8">
-          <button onClick={toggleMute} disabled={!micReady} className={`flex flex-col items-center justify-center transition-transform active:scale-95 duration-150 ${!micReady ? 'opacity-50 cursor-not-allowed' : muted ? 'text-red-600' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
-            <span className="material-symbols-outlined">mic</span>
-            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Mic</span>
+          {/* Mic Button */}
+          <button onClick={toggleMute} disabled={!micReady} className={`flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-lg transition-all duration-150 ${!micReady ? 'opacity-50 cursor-not-allowed text-on-surface-variant' : muted ? 'bg-red-600 text-white' : 'bg-brand-indigo text-white hover:brightness-110'}`}>
+            <span className="material-symbols-outlined text-lg">{muted ? 'mic_off' : 'mic'}</span>
+            <span className="font-headline font-bold text-[10px] uppercase tracking-wider">{muted ? 'Mic Off' : 'Mic On'}</span>
           </button>
-          <button onClick={startVideoCall} disabled={videoActive} className={`flex flex-col items-center justify-center transition-transform hover:scale-110 active:scale-95 duration-150 ${videoActive ? 'text-brand-indigo' : 'text-on-surface-variant hover:text-brand-indigo'}`}>
-            <span className="material-symbols-outlined">videocam</span>
-            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Camera</span>
+
+          {/* Camera Button */}
+          <button onClick={videoActive ? stopVideo : startVideoCall} className={`flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-lg transition-all duration-150 ${videoActive ? 'bg-red-600 text-white' : 'bg-brand-indigo text-white hover:brightness-110'}`}>
+            <span className="material-symbols-outlined text-lg">{videoActive ? 'videocam_off' : 'videocam'}</span>
+            <span className="font-headline font-bold text-[10px] uppercase tracking-wider">{videoActive ? 'Cam Off' : 'Cam On'}</span>
           </button>
-          <button onClick={startScreenShare} disabled={shareButtonLocked} className={`bg-brand-indigo text-white rounded-xl px-6 py-2 flex items-center gap-2 hover:scale-110 transition-transform active:scale-95 duration-150 ${shareButtonLocked ? 'opacity-50 cursor-not-allowed' : ''}`}>
-            <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>screen_share</span>
-            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Share</span>
+
+          {/* Screen Share Button */}
+          <button onClick={screenSharing ? stopScreenShare : startScreenShare} disabled={shareButtonLocked} className={`flex items-center gap-2 py-2 px-6 rounded-lg font-headline font-bold text-xs uppercase tracking-widest transition-all duration-150 ${shareButtonLocked ? 'opacity-50 cursor-not-allowed bg-gray-400 text-white' : screenSharing ? 'bg-red-600 text-white hover:brightness-110' : 'bg-brand-indigo text-white hover:brightness-110'}`}>
+            <span className="material-symbols-outlined">{screenSharing ? 'stop_circle' : 'screen_share'}</span>
+            {screenSharing ? 'Stop Share' : 'Share Screen'}
           </button>
-          <button className="flex flex-col items-center justify-center text-on-surface-variant hover:text-brand-indigo transition-transform hover:scale-110 active:scale-95 duration-150">
-            <span className="material-symbols-outlined">radio_button_checked</span>
-            <span className="font-headline font-bold text-[11px] uppercase tracking-wider">Record</span>
+
+          {/* Record Button */}
+          <button className="flex flex-col items-center justify-center gap-1 py-2 px-4 rounded-lg text-on-surface-variant hover:text-brand-indigo transition-all duration-150">
+            <span className="material-symbols-outlined text-lg">radio_button_checked</span>
+            <span className="font-headline font-bold text-[10px] uppercase tracking-wider">Record</span>
           </button>
         </div>
         <div className="h-8 w-px bg-outline-variant/20 mx-4"></div>
-        <button className="flex items-center gap-3 px-6 py-2 bg-red-500 text-white rounded-xl font-headline font-bold text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-red-500/20">
-          <span className="material-symbols-outlined text-sm">call_end</span>
-          Leave
+        <button className="flex items-center gap-2 px-6 py-2 bg-red-600 text-white rounded-lg font-headline font-bold text-xs uppercase tracking-widest hover:brightness-110 active:scale-95 transition-all shadow-md shadow-red-600/30">
+          <span className="material-symbols-outlined">call_end</span>
+          Leave Call
         </button>
       </nav>
     </div>
